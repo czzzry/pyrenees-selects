@@ -1,0 +1,15 @@
+.venv/
+raw_footage/
+outputs/
+cache/
+music_library/
+*.mp4
+*.mov
+*.m4v
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.ogg
+__pycache__/
+.DS_Store
