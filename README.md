@@ -61,6 +61,18 @@ The Generate tab has a backend selector:
 
 Remote processing may upload private footage to an external machine in the future. Use it only if you trust the provider and understand the cost.
 
+```mermaid
+flowchart LR
+    A[Selected local footage] --> B[Metadata and thumbnails]
+    B --> C[Frame sampling and scoring]
+    C --> D[Human clip review]
+    D --> E[Local ffmpeg render]
+    D --> F[DaVinci handoff]
+    E --> G[Local outputs and diagnostics]
+```
+
+The Streamlit UI orchestrates the workflow, while `processor.py`, `music.py`, and `diagnostics.py` keep export and reporting helpers separate from the page state.
+
 ## Footage
 
 Default footage folder:
@@ -250,6 +262,19 @@ The `Results` tab shows a Performance Summary with total stage timing, slowest s
 - Add better music metadata tagging.
 - Continue UX polish around clip review.
 - Add provider-specific remote worker execution only after privacy/cost controls are clear.
+
+## Validation
+
+```bash
+python3 -m unittest discover -s tests
+python3 -m compileall -q app.py processor.py diagnostics.py music.py
+```
+
+GitHub Actions runs the same dependency-free smoke checks on every pull request and push to `main`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Processing States
 

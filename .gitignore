@@ -1,4 +1,5 @@
 .venv/
+venv/
 raw_footage/
 outputs/
 cache/
@@ -12,4 +13,10 @@ music_library/
 *.flac
 *.ogg
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+.idea/
+.vscode/
 .DS_Store
