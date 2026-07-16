@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from .config import bundled_resource_dir
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
@@ -35,11 +38,24 @@ class VideoMetadata:
         return asdict(self)
 
 
+def _bundled_tool(name: str) -> str | None:
+    override = os.environ.get("PYRENEES_SELECTS_MEDIA_BIN_DIR")
+    roots = [Path(override).expanduser()] if override else []
+    resources = bundled_resource_dir()
+    if resources:
+        roots.extend((resources / "bin", resources.parent / "Frameworks"))
+    for root in roots:
+        candidate = root / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+    return None
+
+
 def require_media_tools() -> tuple[str, str]:
-    ffmpeg = shutil.which("ffmpeg")
-    ffprobe = shutil.which("ffprobe")
+    ffmpeg = _bundled_tool("ffmpeg") or shutil.which("ffmpeg")
+    ffprobe = _bundled_tool("ffprobe") or shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
-        raise MediaToolError("ffmpeg and ffprobe are required and must be available on PATH.")
+        raise MediaToolError("The bundled media tools could not be found. Reinstall Pyrenees Selects.")
     return ffmpeg, ffprobe
 
 

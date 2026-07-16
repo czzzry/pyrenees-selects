@@ -62,6 +62,21 @@ On the real archive, all 79 Pyrenees videos scan successfully. The first baselin
 
 ## Run it
 
+### Mac app — recommended
+
+On the Intel Mac used for this project, build and install the self-contained personal application:
+
+```bash
+./scripts/build_macos_app.sh
+./scripts/install_macos_app.sh
+```
+
+The result is **Pyrenees Selects.app** in `/Applications`. It presents the interface in a native WebKit window and talks directly to the bundled Python code—there is no listening port, local server, network permission, or background process to manage. The application includes checksum-pinned Intel FFmpeg 8.1.2 tools, so using the installed app does not require Homebrew, Python, or a terminal.
+
+The local build is ad-hoc signed: no Apple account is needed because it is intended for personal use on the Mac that built it. A public downloadable build would need a separately reviewed FFmpeg distribution plus Apple Developer ID signing and notarization.
+
+### Development server
+
 ### 1. Install the system requirement
 
 Python 3.11 or later is required. The first vertical slice has no third-party Python runtime dependencies.

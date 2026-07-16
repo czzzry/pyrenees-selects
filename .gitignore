@@ -1,5 +1,9 @@
 .venv/
+.venv-*/
 venv/
+build/
+dist/
+.cache/
 raw_footage/
 outputs/
 cache/
@@ -22,3 +26,4 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+packaging/macos/PyreneesSelects.icns

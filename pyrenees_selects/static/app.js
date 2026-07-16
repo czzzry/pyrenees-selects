@@ -11,6 +11,7 @@ const elements = {
   reviewCount: document.getElementById("reviewCount"),
   projectForm: document.getElementById("projectForm"),
   sourceDir: document.getElementById("sourceDir"),
+  chooseFolderButton: document.getElementById("chooseFolderButton"),
   scanButton: document.getElementById("scanButton"),
   formStatus: document.getElementById("formStatus"),
   video: document.getElementById("candidateVideo"),
@@ -35,6 +36,27 @@ let state = { project: null, summary: null, candidate: null };
 let selectedRole = null;
 let lastDecision = null;
 let busy = false;
+let desktopMode = false;
+let currentVideoUrl = null;
+let initialLoadStarted = false;
+const desktopExpected = new URLSearchParams(window.location.search).get("desktop") === "1";
+
+function activateDesktop() {
+  if (desktopMode || typeof window.pywebview?.api?.state !== "function") return;
+  desktopMode = true;
+  elements.chooseFolderButton.hidden = false;
+  startInitialLoad();
+}
+
+window.addEventListener("pywebviewready", activateDesktop);
+
+elements.chooseFolderButton.addEventListener("click", async () => {
+  const chosen = await window.pywebview.api.choose_footage_folder(elements.sourceDir.value);
+  if (chosen) {
+    elements.sourceDir.value = chosen;
+    elements.sourceDir.setAttribute("aria-invalid", "false");
+  }
+});
 
 function setView(name) {
   for (const key of ["setup", "review", "complete", "error"]) {
@@ -51,6 +73,19 @@ function setBusy(value, message = "Preparing the screening room…") {
 }
 
 async function request(url, options = {}) {
+  if (desktopMode) {
+    const payload = options.body ? JSON.parse(options.body) : {};
+    if (url === "/api/state") return window.pywebview.api.state();
+    if (url === "/api/projects") {
+      return window.pywebview.api.create_project(payload.name, payload.source_dir);
+    }
+    if (url === "/api/scan") return window.pywebview.api.scan(payload.project_id);
+    const decisionMatch = url.match(/^\/api\/candidates\/(\d+)\/decision$/);
+    if (decisionMatch) {
+      return window.pywebview.api.decide(Number(decisionMatch[1]), payload.decision, payload.story_role || null);
+    }
+    throw new Error("Unsupported desktop request.");
+  }
   const response = await fetch(url, {
     ...options,
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -109,13 +144,42 @@ function renderCandidate(candidate) {
   elements.sourceRange.textContent = `${formatClock(candidate.start_seconds)}–${formatClock(candidate.start_seconds + candidate.duration)} + ${candidate.handle_seconds}s handles`;
   elements.sourceFormat.textContent = `${candidate.width}×${candidate.height} · ${Number(candidate.fps).toFixed(2)} fps · ${candidate.codec.toUpperCase()}`;
   elements.heroFrameNumber.textContent = `Candidate ${String(candidate.id).padStart(3, "0")} · review proxy 360p`;
-  elements.video.pause();
-  elements.video.src = candidate.video_url;
-  elements.video.load();
-  elements.contextOne.src = candidate.context_urls[0];
-  elements.contextTwo.src = candidate.context_urls[1];
+  if (desktopMode) {
+    loadDesktopAssets(candidate.id);
+  } else {
+    elements.video.pause();
+    elements.video.src = candidate.video_url;
+    elements.video.load();
+    elements.contextOne.src = candidate.context_urls[0];
+    elements.contextTwo.src = candidate.context_urls[1];
+  }
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
+}
+
+function videoUrlFromBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return URL.createObjectURL(new Blob([bytes], { type: "video/mp4" }));
+}
+
+async function loadDesktopAssets(candidateId) {
+  setBusy(true, "Preparing low-resolution review media…");
+  try {
+    const assets = await window.pywebview.api.candidate_assets(candidateId);
+    if (state.candidate?.id !== candidateId) return;
+    elements.video.pause();
+    if (currentVideoUrl) URL.revokeObjectURL(currentVideoUrl);
+    currentVideoUrl = videoUrlFromBase64(assets.video_base64);
+    elements.video.src = currentVideoUrl;
+    elements.video.load();
+    elements.contextOne.src = assets.context_data_urls[0];
+    elements.contextTwo.src = assets.context_data_urls[1];
+    setBusy(false);
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function showError(error) {
@@ -235,4 +299,18 @@ document.addEventListener("keydown", event => {
 });
 
 elements.retryButton.addEventListener("click", loadState);
-loadState();
+
+function startInitialLoad() {
+  if (initialLoadStarted) return;
+  initialLoadStarted = true;
+  loadState();
+}
+
+if (desktopExpected) {
+  const bridgePoll = setInterval(() => {
+    activateDesktop();
+    if (desktopMode) clearInterval(bridgePoll);
+  }, 50);
+} else {
+  startInitialLoad();
+}

@@ -44,6 +44,8 @@ h1, h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; lette
 .project-form h2 { margin: 8px 0 34px; font-size: 42px; }
 .project-form label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 800; }
 .project-form input { width: 100%; min-height: 44px; padding: 13px 11px; border: 1px solid #8e8a80; background: var(--input); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.folder-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.folder-field button { min-height: 44px; border: 1px solid #8e8a80; border-left: 0; background: var(--ink); color: white; padding: 0 15px; font-size: 12px; font-weight: 800; }
 .project-form input[aria-invalid="true"] { border-color: var(--error); outline: 1px solid var(--error); }
 .field-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .primary { width: 100%; min-height: 44px; margin-top: 18px; border: 1px solid var(--ink); background: var(--acid); color: var(--ink); padding: 14px; font-size: 12px; font-weight: 850; }

@@ -4,6 +4,7 @@ import argparse
 import json
 import mimetypes
 import re
+import threading
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
@@ -67,6 +68,25 @@ class Application:
             "summary": self.store.summary(project["id"]),
             "candidate": self.candidate_payload(self.store.next_candidate(project["id"])),
             "default_source": self.default_source,
+        }
+
+    def create_project(self, name: str, source_dir: str) -> dict[str, Any]:
+        safe_name = (name or "Pyrenees 2024").strip()[:80]
+        source = Path(source_dir).expanduser().resolve(strict=True)
+        if not source.is_dir():
+            raise ValueError("Choose an existing footage folder.")
+        return self.store.upsert_project(PROJECT_ID, safe_name, str(source))
+
+    def scan(self, project_id: str = PROJECT_ID) -> dict[str, Any]:
+        return scan_project(self.store, project_id or PROJECT_ID)
+
+    def decide(self, candidate_id: int, decision: str, story_role: str | None = None) -> dict[str, Any]:
+        candidate = self.store.decide(candidate_id, decision, story_role)
+        project_id = candidate["project_id"]
+        return {
+            "candidate": self.candidate_payload(candidate),
+            "next_candidate": self.candidate_payload(self.store.next_candidate(project_id)),
+            "summary": self.store.summary(project_id),
         }
 
     def candidate_payload(self, candidate: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -231,28 +251,23 @@ def handler_factory(application: Application) -> type[BaseHTTPRequestHandler]:
             try:
                 payload = self._read_json()
                 if path == "/api/projects":
-                    name = str(payload.get("name") or "Pyrenees 2024").strip()[:80]
-                    source = Path(str(payload.get("source_dir") or "")).expanduser().resolve(strict=True)
-                    if not source.is_dir():
-                        raise ValueError("Choose an existing footage folder.")
-                    project = application.store.upsert_project(PROJECT_ID, name, str(source))
+                    project = application.create_project(
+                        str(payload.get("name") or "Pyrenees 2024"),
+                        str(payload.get("source_dir") or ""),
+                    )
                     self._json({"project": project}, HTTPStatus.CREATED)
                     return
                 if path == "/api/scan":
                     project_id = str(payload.get("project_id") or PROJECT_ID)
-                    self._json(scan_project(application.store, project_id))
+                    self._json(application.scan(project_id))
                     return
                 match = re.fullmatch(r"/api/candidates/(\d+)/decision", path)
                 if match:
-                    candidate = application.store.decide(
-                        int(match.group(1)), str(payload.get("decision") or ""), payload.get("story_role") or None
-                    )
-                    project_id = candidate["project_id"]
-                    self._json({
-                        "candidate": application.candidate_payload(candidate),
-                        "next_candidate": application.candidate_payload(application.store.next_candidate(project_id)),
-                        "summary": application.store.summary(project_id),
-                    })
+                    self._json(application.decide(
+                        int(match.group(1)),
+                        str(payload.get("decision") or ""),
+                        payload.get("story_role") or None,
+                    ))
                     return
                 self._json({"error": "Not found."}, HTTPStatus.NOT_FOUND)
             except FileNotFoundError:
@@ -274,12 +289,30 @@ def build_application(data_dir: Path | None = None, default_source: str = "") ->
     return Application(paths=paths, store=Store(paths.database), default_source=default_source)
 
 
-def run(host: str, port: int, data_dir: Path | None = None, default_source: str = "", open_browser: bool = True) -> None:
+def create_local_server(
+    data_dir: Path | None = None,
+    default_source: str = "",
+    host: str = "127.0.0.1",
+    port: int = 0,
+) -> tuple[ThreadingHTTPServer, Application]:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("Pyrenees Selects only binds to the local machine.")
     application = build_application(data_dir=data_dir, default_source=default_source)
     server = ThreadingHTTPServer((host, port), handler_factory(application))
-    url = f"http://localhost:{port}"
+    server.daemon_threads = True
+    return server, application
+
+
+def serve_in_background(server: ThreadingHTTPServer) -> threading.Thread:
+    thread = threading.Thread(target=server.serve_forever, name="pyrenees-selects-http", daemon=True)
+    thread.start()
+    return thread
+
+
+def run(host: str, port: int, data_dir: Path | None = None, default_source: str = "", open_browser: bool = True) -> None:
+    server, application = create_local_server(data_dir, default_source, host, port)
+    actual_port = server.server_address[1]
+    url = f"http://localhost:{actual_port}"
     print(f"Pyrenees Selects is running at {url}")
     print(f"Local data: {application.paths.root}")
     if open_browser:

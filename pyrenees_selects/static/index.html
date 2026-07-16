@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Pyrenees Selects</title>
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to review</a>
   <header class="masthead">
-    <a class="wordmark" href="/" aria-label="Pyrenees Selects home">The Pyrenees Edit</a>
+    <a class="wordmark" href="./index.html" aria-label="Pyrenees Selects home">The Pyrenees Edit</a>
     <div class="edition">Selects review · Volume 01</div>
     <div class="review-count" id="reviewCount">Local project</div>
   </header>
@@ -32,7 +32,10 @@
         <p class="form-kicker">Project 001</p>
         <h2>Pyrenees 2024</h2>
         <label for="sourceDir">Footage folder</label>
-        <input id="sourceDir" name="sourceDir" autocomplete="off" spellcheck="false" required>
+        <div class="folder-field">
+          <input id="sourceDir" name="sourceDir" autocomplete="off" spellcheck="false" required>
+          <button type="button" id="chooseFolderButton" hidden>Choose…</button>
+        </div>
         <p class="field-note">Only top-level MP4, MOV, and M4V files are scanned. Canada, panorama, and hyperlapse subfolders remain outside this project.</p>
         <button class="primary" type="submit" id="scanButton">Create project and scan footage</button>
         <div class="form-status" id="formStatus" role="alert" aria-live="assertive"></div>

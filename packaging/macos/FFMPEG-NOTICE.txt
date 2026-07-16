@@ -1,0 +1,16 @@
+Pyrenees Selects invokes separate FFmpeg and FFprobe executables for media
+inspection and disposable proxy generation.
+
+The locally built Intel application includes the pinned FFmpeg 8.1.2 binaries
+linked from FFmpeg's official download page and produced by evermeet.cx. The
+build script verifies exact SHA-256 checksums before packaging. The executable
+reports its applicable license when run with `ffmpeg -L`. Source, build and
+licensing information are available from:
+
+https://ffmpeg.org/
+https://ffmpeg.org/legal.html
+https://evermeet.cx/ffmpeg/
+
+The generated .app is intended for personal use on the Mac that built it. Do
+not publish the generated application bundle without reviewing the license of
+the exact FFmpeg build included and supplying all corresponding obligations.
