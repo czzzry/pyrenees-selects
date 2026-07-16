@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  smoke:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +15,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests
-      - run: python -m compileall -q app.py processor.py diagnostics.py music.py
+      - run: python -m compileall -q pyrenees_selects tests

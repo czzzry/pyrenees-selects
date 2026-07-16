@@ -12,6 +12,8 @@ music_library/
 *.m4a
 *.flac
 *.ogg
+*.sqlite3
+*.db
 __pycache__/
 *.py[cod]
 .pytest_cache/

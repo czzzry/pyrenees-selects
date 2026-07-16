@@ -1,290 +1,173 @@
-# Drone Hiking Rough Cut
+<p align="center">
+  <img src="docs/assets/readme-header.svg" alt="Pyrenees Selects — find the journey inside the footage" width="100%">
+</p>
 
-Experimental AI-assisted video triage and rough-cut tool for drone hiking footage. It is local-first: raw footage stays on your machine by default, ffmpeg handles media processing, and OpenCV-based analysis helps surface interesting moments for human editing.
+<p align="center">
+  A local-first screening room for turning an overwhelming drone archive into a coherent short-film draft.
+</p>
 
-This is not a finished commercial editor. The current goal is to speed up review, rough-cut assembly, and DaVinci Resolve handoff while keeping the workflow understandable and private.
+<p align="center">
+  <strong>Pyrenees-first</strong> · <strong>sub-480p review</strong> · <strong>originals untouched</strong> · <strong>DaVinci-bound</strong>
+</p>
 
-## What It Does
+![A red freight train moving through a green landscape beneath a blue sky](docs/assets/readme-train.jpg)
 
-- Scans selected local drone clips.
-- Generates thumbnails and metadata.
-- Finds candidate moments using motion/change, sharpness, stability, novelty, and optional small-moving-subject hints.
-- Lets you label clips for DaVinci review.
-- Exports rough cuts, must-review clips, CSV decision lists, and performance reports.
-- Supports local music files or a local music library.
-- Can export a future remote-job package, but does not upload footage or connect to cloud providers.
+## The project
 
-## Local-First Privacy
+Pyrenees Selects began with a very specific problem: **79 DJI Mini 4 Pro videos, 85 GB of HEVC footage, and more than three hours of mountains that look similar when viewed as filenames.** The footage covers a 40-day crossing of the Pyrenees. The intended result is a short, coherent film—roughly two minutes, subject to an actual duration experiment—not a folder of disconnected highlight snippets.
 
-Local Mac processing is the default. Remote processing is only a future-facing package export. Raw footage, rendered outputs, cache files, and music libraries are excluded from Git by `.gitignore`.
+Watching every source file is the expensive part. This project therefore concentrates on the work before precision editing:
 
-## Setup
+1. inspect the archive without modifying it;
+2. surface sustained candidate sequences at disposable review quality;
+3. record Keep, Maybe, and Skip decisions against exact source ranges;
+4. assemble duration variants as editable shot cards;
+5. hand the chosen ranges to DaVinci Resolve for finishing.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+It is reusable by construction, but deliberately **not generalized in advance**. The engineering target is the real Pyrenees 2024 archive on a 2020 Intel MacBook Pro with 16 GB of memory. Other cameras, genres, teams, and cloud workflows can wait until this dataset works exceptionally well.
 
-Install ffmpeg on macOS:
+## The failed first version
+
+The original repository tried to become an “AI video editor” before it understood the useful job. It accumulated music-library management, color controls, automatic montage generation, experimental subject crops, remote-compute packaging, diagnostics, and a seven-tab Streamlit interface.
+
+Most of that behavior lived in a single **2,094-line `app.py`**. The product scope was too broad and the architecture made every experiment harder to trust. It could generate things, but it did not provide a convincing path from a repetitive archive to an intentional film.
+
+The rewrite keeps the lesson and discards the implementation:
+
+- the real bottleneck is footage triage, not another editing timeline;
+- a promising moment must remain a source range, not become an orphaned rendered file;
+- sustained shots and neighboring-shot compatibility matter more than attractive individual frames;
+- automation should reduce review while leaving editorial judgment visible;
+- honest baselines are more useful than pretending a heuristic is intelligent.
+
+The legacy implementation remains recoverable in Git history. There is no `legacy/` folder inside the current product.
+
+## What works today
+
+The clean-slate vertical slice currently:
+
+- creates a folder-backed local project;
+- scans only top-level `.mp4`, `.mov`, and `.m4v` files;
+- reads capture time, duration, codec, dimensions, frame rate, and size with `ffprobe`;
+- stores metadata and decisions in SQLite outside both the repository and footage folder;
+- creates one transparent baseline candidate per source;
+- generates 360p H.264 review clips and two context frames only when requested;
+- provides the editorial contact-print screening interface;
+- records Keep, Maybe, Skip, optional story roles, keyboard controls, and undo;
+- binds only to localhost and never serves arbitrary source paths.
+
+On the real archive, all 79 Pyrenees videos scan successfully. The first baseline queue contains just under ten minutes of review footage.
+
+> **Current honesty boundary:** candidate placement is a workflow baseline, not finished highlight intelligence. Sparse technical and visual ranking is the next engineering slice.
+
+## Run it
+
+### 1. Install the system requirement
+
+Python 3.11 or later is required. The first vertical slice has no third-party Python runtime dependencies.
+
+Install `ffmpeg` and `ffprobe` on macOS:
 
 ```bash
 brew install ffmpeg
 ```
 
-Restart Streamlit after installing ffmpeg so the app can detect `ffmpeg` and `ffprobe`.
+### 2. Start the local app
 
-## Run
+From the repository:
 
 ```bash
-streamlit run app.py
+python3 -m pyrenees_selects --source "/path/to/DJI drone"
 ```
 
-## App Sections
+The app opens at [http://localhost:8741](http://localhost:8741). If the browser does not open automatically, visit that address manually.
 
-The app is organized into tabs:
+To use a disposable application-data location:
 
-- `1. Footage Source`: choose `raw_footage/` or pick a custom local folder.
-- `2. Select Videos`: review thumbnails and metadata, then check the videos to include.
-- `3. Edit Settings`: set duration, shot count, selection rules, aspect ratio, resolution, and color.
-- `4. Clip Discovery`: rank interesting moments, label them for review, and export DaVinci handoff clips.
-- `5. Music`: choose no music, a local music file, or a track from `music_library/`.
-- `6. Generate`: start processing, watch progress/logs, or cancel a running job.
-- `7. Results`: preview the export, open the output folder, download the MP4, and review edit decisions.
-
-## Processing Backend
-
-The Generate tab has a backend selector:
-
-- `Local Mac`: default, runs the current local processing pipeline.
-- `Remote worker / external compute (experimental)`: does not connect to any provider. It only exports a remote job package under `outputs/remote_job_package/`.
-
-Remote processing may upload private footage to an external machine in the future. Use it only if you trust the provider and understand the cost.
-
-```mermaid
-flowchart LR
-    A[Selected local footage] --> B[Metadata and thumbnails]
-    B --> C[Frame sampling and scoring]
-    C --> D[Human clip review]
-    D --> E[Local ffmpeg render]
-    D --> F[DaVinci handoff]
-    E --> G[Local outputs and diagnostics]
+```bash
+python3 -m pyrenees_selects \
+  --source "/path/to/DJI drone" \
+  --data-dir "/path/to/disposable/app-data"
 ```
 
-The Streamlit UI orchestrates the workflow, while `processor.py`, `music.py`, and `diagnostics.py` keep export and reporting helpers separate from the page state.
+### 3. Screen the candidates
 
-## Footage
+Create the project and scan the folder. Metadata scanning does not transcode the archive. Review media is generated lazily when a candidate appears.
 
-Default footage folder:
+| Key | Decision |
+|---|---|
+| `1` | Skip |
+| `2` | Maybe |
+| `3` | Keep |
+| `Space` | Play or pause |
+
+Story-role labels—Opening, Transition, Peak, and Ending—are optional. Decisions persist immediately and can be undone.
+
+Stop the local server with `Ctrl-C` in the terminal.
+
+## Where the data goes
+
+By default on macOS, metadata and disposable review assets live under:
 
 ```text
-raw_footage/
+~/Library/Application Support/Pyrenees Selects/
 ```
 
-You can also choose `Use custom local folder path` in the `Footage Source` tab and click `Choose Folder` to open the macOS folder picker. The app scans only the selected folder for `.mp4`, `.mov`, and `.m4v` files. It does not scan `.venv`.
+The configured source folder is read-only input. Deleting the application-data folder removes the database and proxies; it does not touch the original footage.
 
-Videos are shown in a selectable table with thumbnail, filename, duration, resolution, and file size. Nothing is included by default. Use the checkboxes or the quick buttons:
+No video file is tracked in this repository. The train image above is a single compressed documentation still included with the repository owner’s explicit permission.
 
-- Select all
-- Select none
-- Select shortest 10
-- Select newest 10
+## Product direction
 
-Only checked videos are analyzed.
+### Review
 
-## Thumbnails
+One candidate sequence at a time: playable low-resolution media, two contextual frames from the same moment, a plain-English rationale, optional story role, and persistent decisions.
 
-Video thumbnails are cached in:
+### Assembly
 
-```text
-outputs/thumbnails/
-```
+Generate 90-second, two-minute, and three-minute storyboard drafts. Allow shots to be reordered, replaced, removed, or locked—without recreating a professional multitrack editor.
 
-The cache key includes the video path, modified time, and file size, so changed videos get new thumbnails. If a thumbnail cannot be generated, the app shows a neutral placeholder instead of crashing.
+### Handoff
 
-## Music
+Export exact source ranges, frame rates, handles, and metadata into an open editorial representation and a DaVinci Resolve-compatible timeline. Rendered review clips remain disposable.
 
-Music modes:
+### Evaluation
 
-- No music
-- Use my own music file
-- Auto-select music
+Compare the result with free DJI LightCut using processing time, active human time, disk use, candidate acceptance, recall against a labeled subset, duplicate rate, shot-duration distribution, and blind viewer measures.
 
-`No music` exports a silent video.
+## Next engineering slices
 
-`Use my own music file` lets you choose, upload, or enter a local `.mp3`, `.wav`, `.m4a`, `.flac`, or `.ogg` path. The app validates the file before generation, trims it to the final video duration, and adds short fade-in/fade-out.
+1. **Sparse Pyrenees analysis** — evaluate exposure, sharpness, sustained motion, stability, scene change, and cross-source novelty at very low resolution.
+2. **Candidate calibration** — label a representative subset and measure precision and recall rather than tuning by vibes.
+3. **Storyboard assembly** — build coherent duration variants with a loose coast-to-mountains-to-ending journey arc.
+4. **Resolve handoff** — export non-destructive editorial ranges with handles.
+5. **LightCut benchmark** — run the same representative footage through the free comparison product and publish the results.
 
-`Auto-select music` scans:
+## Architecture
 
-```text
-music_library/
-```
+The first slice intentionally avoids a frontend build system and account layer:
 
-It recursively scans `music_library/` and subfolders, follows symlinks, ignores hidden folders and `.git`, and caches scan results between refreshes. It prefers matching mood metadata, but if metadata is missing it can still choose a random track long enough for the target duration. If no suitable track exists, generation is blocked until you either add tracks, switch to your own music file, or explicitly choose `Continue without music`.
+- Python standard-library localhost server;
+- SQLite for durable project and decision state;
+- `ffmpeg`/`ffprobe` for media inspection and disposable review assets;
+- semantic HTML, CSS, and small vanilla JavaScript interface;
+- cache keys derived from source identity, file size, modification time, range, and render policy.
 
-Optional metadata file:
+Read the durable decisions:
 
-```text
-music_library/music_library.csv
-```
+- [Product brief](docs/product_brief.md)
+- [Design lock](docs/design_lock.md)
+- [Decision log](docs/decision_log.md)
+- [Architecture](docs/architecture.md)
 
-CSV columns:
-
-```text
-filename,title,artist,mood,bpm,license,source_url,attribution_required,attribution_text
-```
-
-The app does not scrape or download music. Selected music details and attribution, if required, are written to `outputs/music_used.txt`.
-
-The Music tab includes a `Music Library Setup` section. Use `Open music_library folder` to drop audio files into the library. The optional URL importer only accepts direct audio URLs for tracks you have rights to use; it does not scrape sites or bypass website terms.
-
-## Render Mode
-
-`Fast Preview` uses lower-rate analysis and exports a 720p preview to:
-
-```text
-outputs/rough_cut_preview.mp4
-```
-
-`Final Quality` uses the normal analysis settings and selected export resolution, writing:
-
-```text
-outputs/rough_cut.mp4
-```
-
-## Analysis Cache
-
-Per-video analysis results are cached in:
-
-```text
-cache/analysis_cache/
-```
-
-The cache key uses file path, file size, modified time, duration, clip length, render mode, and the moving-subject setting. Unchanged videos are loaded from cache on later runs.
-
-## Clip Discovery And DaVinci Handoff
-
-The `Clip Discovery` tab ranks candidate moments by motion/change, sharpness/detail, stability/smoothness, visual novelty, and optional small-moving-subject hints. Reasons are written in plain English, such as `smooth forward motion with strong visual change` or `possible small moving subject detected`.
-
-You can label candidates as:
-
-- Must review
-- Maybe
-- Reject
-- Possible animal/bird
-- Landscape reveal
-- Janky control
-- Good opening shot
-- Good closing shot
-
-Labels are saved to:
-
-```text
-outputs/clip_review.csv
-```
-
-`Export Must Review clips` writes individual review clips to:
-
-```text
-outputs/must_review_clips/
-outputs/davinci_review_list.csv
-```
-
-`Create subject-focused preview` is experimental. It exports rough crop/zoom previews for clips labeled `Possible animal/bird` to:
-
-```text
-outputs/subject_focus_clips/
-```
-
-## Outputs
-
-Generated files stay in:
-
-```text
-outputs/
-```
-
-Main outputs:
-
-- `outputs/rough_cut.mp4`
-- `outputs/rough_cut_preview.mp4`
-- `outputs/edit_decisions.csv`
-- `outputs/rejected_segments.csv`
-- `outputs/clip_review.csv`
-- `outputs/davinci_review_list.csv`
-- `outputs/contact_sheet.jpg`
-- `outputs/music_used.txt`
-- `outputs/run_log.txt`
-- `outputs/selected_clips/`
-- `outputs/must_review_clips/`
-- `outputs/subject_focus_clips/`
-- `outputs/thumbnails/`
-- `outputs/performance_report.csv`
-- `outputs/performance_report.txt`
-- `outputs/remote_job_package/`
-
-`edit_decisions.csv` lists each selected segment with source filename, start/end time, duration, motion score, sharpness score, variety score, total score, and selection reason.
-
-In the `Results` tab, the app loads `edit_decisions.csv` and shows clip number, source filename, start/end time, duration, total score, reason selected, and a small preview thumbnail where available.
-
-Use `Open output folder` in the `Results` tab to open `outputs/` on macOS. Final Quality rough cuts are written to:
-
-```text
-outputs/rough_cut.mp4
-```
-
-Silent exports do not keep a separate visible `rough_cut_silent.mp4`; any intermediate file is stored under `outputs/temp/` and removed after successful export.
-
-## Performance Diagnostics
-
-After each run, the app writes:
-
-```text
-outputs/performance_report.csv
-outputs/performance_report.txt
-```
-
-The report times each major stage: scanning, metadata extraction, thumbnail generation, frame analysis, scoring, clip selection, rendering, assembly, music, and final export. It also records file counts, candidate segment counts, output files created, and a lightweight system snapshot with Python version, ffmpeg path/version, CPU count, available memory when detectable, source footage count/size, and export settings.
-
-The `Results` tab shows a Performance Summary with total stage timing, slowest stage, percent of total time, and a plain-English bottleneck diagnosis. If frame analysis dominates, use Fast Preview mode and caching. If rendering dominates, lower export resolution or shorten clips. If assembly dominates, use fewer clips or hard cuts.
-
-## Project Docs
-
-- `docs/product_brief.md`
-- `docs/architecture.md`
-- `docs/decision_log.md`
-- `docs/roadmap.md`
-- `docs/performance_notes.md`
-
-## Planned Next
-
-- Improve the experimental subject-focus tool.
-- Add better music metadata tagging.
-- Continue UX polish around clip review.
-- Add provider-specific remote worker execution only after privacy/cost controls are clear.
-
-## Validation
+## Test
 
 ```bash
 python3 -m unittest discover -s tests
-python3 -m compileall -q app.py processor.py diagnostics.py music.py
+python3 -m compileall -q pyrenees_selects tests
+node --check pyrenees_selects/static/app.js
 ```
 
-GitHub Actions runs the same dependency-free smoke checks on every pull request and push to `main`.
+## Status
 
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-## Processing States
-
-- `IDLE`: no videos are selected.
-- `READY`: videos are selected and the app can generate.
-- `RUNNING`: a background worker is processing video.
-- `DONE`: processing finished successfully.
-- `FAILED`: processing stopped with an error; check `outputs/run_log.txt`.
-- `CANCELLED`: processing was cancelled by the user.
-
-## If Processing Takes Too Long
-
-Use `Cancel Processing` in the app. You can also reduce export resolution to `1080p`, reduce number of shots, use hard cuts, select fewer source videos, or lower the target duration.
+Experimental, public, and Pyrenees-first. The repository is public so the product decisions, failed assumptions, evaluation method, and eventual comparison can be inspected—not because the current slice is a finished consumer editor.

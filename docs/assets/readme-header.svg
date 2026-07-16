@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-labelledby="title description">
+  <title id="title">Pyrenees Selects</title>
+  <desc id="description">Editorial title card for a local-first drone-footage screening room.</desc>
+  <rect width="1200" height="420" fill="#f4f1e9"/>
+  <text x="48" y="55" fill="#171a16" font-family="Georgia, 'Times New Roman', serif" font-size="27" font-weight="700">THE PYRENEES EDIT</text>
+  <text x="1152" y="54" text-anchor="end" fill="#171a16" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" letter-spacing="2.5">SELECTS REVIEW · VOLUME 01</text>
+  <line x1="48" y1="78" x2="1152" y2="78" stroke="#171a16" stroke-width="3"/>
+
+  <text x="48" y="192" fill="#171a16" font-family="Georgia, 'Times New Roman', serif" font-size="94" letter-spacing="-3">PYRENEES</text>
+  <text x="48" y="282" fill="#171a16" font-family="Georgia, 'Times New Roman', serif" font-size="94" letter-spacing="-3">SELECTS</text>
+  <text x="53" y="334" fill="#596159" font-family="Georgia, 'Times New Roman', serif" font-size="22">Find the journey inside the footage.</text>
+
+  <line x1="872" y1="119" x2="1152" y2="119" stroke="#a5a39b" stroke-width="1"/>
+  <text x="872" y="160" fill="#171a16" font-family="Georgia, 'Times New Roman', serif" font-size="44">79</text>
+  <text x="942" y="155" fill="#596159" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" letter-spacing="1.8">FILMS</text>
+  <line x1="872" y1="184" x2="1152" y2="184" stroke="#a5a39b" stroke-width="1"/>
+  <text x="872" y="229" fill="#171a16" font-family="Georgia, 'Times New Roman', serif" font-size="44">40</text>
+  <text x="942" y="224" fill="#596159" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" letter-spacing="1.8">DAYS</text>
+  <line x1="872" y1="252" x2="1152" y2="252" stroke="#a5a39b" stroke-width="1"/>
+  <text x="872" y="297" fill="#171a16" font-family="Georgia, 'Times New Roman', serif" font-size="44">03:12</text>
+  <text x="1010" y="292" fill="#596159" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" letter-spacing="1.8">SOURCE</text>
+  <line x1="872" y1="320" x2="1152" y2="320" stroke="#a5a39b" stroke-width="1"/>
+
+  <rect x="872" y="349" width="280" height="38" fill="#d8ff5f" stroke="#171a16" stroke-width="1"/>
+  <text x="1012" y="373" text-anchor="middle" fill="#171a16" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="800" letter-spacing="1.4">LOCAL-FIRST · NON-DESTRUCTIVE</text>
+</svg>

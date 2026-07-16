@@ -1,25 +1,29 @@
 # Decision Log
 
-## Streamlit For Local UI
+## Clean-Slate Rebuild In The Existing Repository
 
-Streamlit keeps the MVP simple, local, and easy to run without a separate frontend/backend stack.
+Replace the legacy product code and stale documentation while preserving Git history, public-repository safeguards, the license, and the security policy. Do not keep a legacy-code folder.
 
-## ffmpeg For Video Processing
+## Pyrenees-First, Reusable By Construction
 
-ffmpeg is reliable for clipping, scaling, color filters, crossfades, audio trimming, and final MP4 export.
+Use clean project and folder boundaries, but validate every capability and performance decision against the real Pyrenees 2024 archive. Reusability is not permission to build speculative features.
 
-## Local-First Default
+## Screening Room Over File Browser
 
-Drone footage is private and large. Local processing avoids upload risk and cloud costs by default.
+Present one sustained candidate sequence at a time. The user decides Keep, Maybe, or Skip without first selecting among 79 source files.
 
-## Remote Compute Is Future Optional
+## Storyboard Over Timeline
 
-Remote processing is represented as a package export only. No provider code is included yet.
+Stage 2 creates duration variants and exposes shot cards for reorder, replacement, locking, and removal. DaVinci Resolve remains the precision editor.
 
-## Local Music Library
+## Editorial Contact-Print Direction
 
-Music selection uses local files and optional local metadata. This avoids scraping, copyright ambiguity, and external music APIs.
+Use the approved warm-paper, black-rule, serif-headline, contact-print visual direction. Reserve the acid-green accent for decisive actions. Avoid dark SaaS dashboards, generic AI visuals, and dense technical control panels.
 
-## DaVinci Handoff Over Full Automation
+## Local-First Media Handling
 
-The app prioritizes discovery, review labels, and handoff files because human editing judgment still matters. It does not pretend automatic montage fully replaces the editor.
+Never modify originals. Use disposable sub-480p review media, sparse analysis, and durable cached metadata. Remote compute may receive low-resolution proxies only after explicit user action.
+
+## Open Editorial Interchange
+
+Persist source identity and exact source ranges independently of rendered clips. Use an open editorial representation and export a Resolve-compatible format rather than making rendered subclips the primary handoff.

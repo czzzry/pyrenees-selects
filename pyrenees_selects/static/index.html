@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Pyrenees Selects</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to review</a>
+  <header class="masthead">
+    <a class="wordmark" href="/" aria-label="Pyrenees Selects home">The Pyrenees Edit</a>
+    <div class="edition">Selects review · Volume 01</div>
+    <div class="review-count" id="reviewCount">Local project</div>
+  </header>
+
+  <main id="main" aria-busy="false">
+    <section class="setup" id="setupView" hidden>
+      <div class="setup-copy">
+        <p class="eyebrow">A local screening room</p>
+        <h1>Find the journey inside the footage.</h1>
+        <p class="lede">Scan the original DJI folder without moving or modifying a file. Review media stays below 480p and every decision points back to its exact source range.</p>
+        <dl class="dataset-facts">
+          <div><dt>79</dt><dd>Pyrenees videos</dd></div>
+          <div><dt>03:12</dt><dd>source runtime</dd></div>
+          <div><dt>≤ 20 min</dt><dd>target review</dd></div>
+        </dl>
+      </div>
+      <form class="project-form" id="projectForm">
+        <p class="form-kicker">Project 001</p>
+        <h2>Pyrenees 2024</h2>
+        <label for="sourceDir">Footage folder</label>
+        <input id="sourceDir" name="sourceDir" autocomplete="off" spellcheck="false" required>
+        <p class="field-note">Only top-level MP4, MOV, and M4V files are scanned. Canada, panorama, and hyperlapse subfolders remain outside this project.</p>
+        <button class="primary" type="submit" id="scanButton">Create project and scan footage</button>
+        <div class="form-status" id="formStatus" role="alert" aria-live="assertive"></div>
+      </form>
+    </section>
+
+    <section class="review" id="reviewView" hidden aria-labelledby="candidateTitle">
+      <div class="contact-sheet">
+        <figure class="hero-frame">
+          <video id="candidateVideo" controls preload="metadata" playsinline></video>
+          <figcaption id="heroFrameNumber">Review proxy · 360p</figcaption>
+        </figure>
+        <figure class="context-frame">
+          <img id="contextOne" alt="Earlier context within this candidate sequence">
+          <figcaption>Context 01</figcaption>
+        </figure>
+        <figure class="context-frame">
+          <img id="contextTwo" alt="Later context within this candidate sequence">
+          <figcaption>Context 02</figcaption>
+        </figure>
+      </div>
+
+      <article class="candidate-copy">
+        <p class="eyebrow" id="candidateEyebrow"></p>
+        <h1 id="candidateTitle" aria-live="polite"></h1>
+        <p class="candidate-reason" id="candidateReason"></p>
+
+        <div class="story-role">
+          <p class="label">Possible story role</p>
+          <div class="role-options" id="roleOptions" aria-label="Story role">
+            <button type="button" data-role="opening" aria-pressed="false">Opening</button>
+            <button type="button" data-role="transition" aria-pressed="false">Transition</button>
+            <button type="button" data-role="peak" aria-pressed="false">Peak</button>
+            <button type="button" data-role="ending" aria-pressed="false">Ending</button>
+          </div>
+        </div>
+
+        <dl class="source-facts">
+          <div><dt>Source</dt><dd id="sourceName"></dd></div>
+          <div><dt>Range</dt><dd id="sourceRange"></dd></div>
+          <div><dt>Original</dt><dd id="sourceFormat"></dd></div>
+        </dl>
+
+        <div class="decision-actions">
+          <button type="button" data-decision="skip"><span>Skip</span><kbd>1</kbd></button>
+          <button type="button" data-decision="maybe"><span>Maybe</span><kbd>2</kbd></button>
+          <button class="keep" type="button" data-decision="keep"><span>Keep</span><kbd>3</kbd></button>
+        </div>
+        <div class="session-state">
+          <span id="sessionSummary"></span>
+          <button type="button" id="undoButton" hidden>Undo last decision</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="complete" id="completeView" hidden>
+      <p class="eyebrow">Screening complete</p>
+      <h1>The first pass is in the can.</h1>
+      <p id="completeSummary"></p>
+      <div class="completion-note">
+        <span>Next</span>
+        <strong>Build the 90-second, two-minute, and three-minute storyboard drafts.</strong>
+      </div>
+    </section>
+
+    <section class="error-panel" id="errorView" hidden role="alert">
+      <p class="eyebrow">Something interrupted the screening</p>
+      <h1>We kept your decisions safe.</h1>
+      <p id="errorMessage"></p>
+      <button type="button" id="retryButton">Try again</button>
+    </section>
+  </main>
+
+  <div class="loading" id="loading" hidden aria-live="polite">
+    <span class="loading-mark" aria-hidden="true"></span>
+    <span id="loadingMessage">Preparing the screening room…</span>
+  </div>
+</body>
+</html>
