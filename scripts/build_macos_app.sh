@@ -48,6 +48,8 @@ iconutil -c icns "$ICONSET" -o "$ICON"
 cd "$ROOT"
 "$VENV/bin/python" setup_macos.py py2app
 
+codesign --force --sign - "$APP/Contents/Resources/bin/ffmpeg"
+codesign --force --sign - "$APP/Contents/Resources/bin/ffprobe"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 

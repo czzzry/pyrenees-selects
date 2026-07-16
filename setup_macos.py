@@ -57,6 +57,7 @@ setup(
                 "LSApplicationCategoryType": "public.app-category.video",
                 "LSMinimumSystemVersion": "12.0",
                 "NSHighResolutionCapable": True,
+                "NSDocumentsFolderUsageDescription": "Pyrenees Selects reads only the footage library you choose and stores review media separately.",
                 "NSHumanReadableCopyright": "Copyright © 2026 Cezary Baraniecki",
                 "NSRequiresAquaSystemAppearance": False,
             },
