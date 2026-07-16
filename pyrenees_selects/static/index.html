@@ -13,7 +13,10 @@
   <header class="masthead">
     <a class="wordmark" href="./index.html" aria-label="Pyrenees Selects home">The Pyrenees Edit</a>
     <div class="edition">Selects review · Volume 01</div>
-    <div class="review-count" id="reviewCount">Local project</div>
+    <div class="masthead-actions">
+      <span class="review-count" id="reviewCount">Local project</span>
+      <button type="button" class="text-button" id="projectsButton">Projects</button>
+    </div>
   </header>
 
   <main id="main" aria-busy="false">
@@ -28,9 +31,18 @@
           <div><dt>≤ 20 min</dt><dd>target review</dd></div>
         </dl>
       </div>
-      <form class="project-form" id="projectForm">
-        <p class="form-kicker">Project 001</p>
-        <h2>Pyrenees 2024</h2>
+      <div class="setup-panel">
+        <div id="projectListSection" hidden>
+          <p class="form-kicker">Continue</p>
+          <h2>Your projects</h2>
+          <div class="project-list" id="projectList"></div>
+          <div class="section-rule"><span>or add another library</span></div>
+        </div>
+        <form class="project-form" id="projectForm">
+        <p class="form-kicker">New local project</p>
+        <h2>Choose a library</h2>
+        <label for="projectName">Project name</label>
+        <input id="projectName" name="projectName" value="Pyrenees 2024" maxlength="80" required>
         <label for="sourceDir">Footage folder</label>
         <div class="folder-field">
           <input id="sourceDir" name="sourceDir" autocomplete="off" spellcheck="false" required>
@@ -39,7 +51,38 @@
         <p class="field-note">Only top-level MP4, MOV, and M4V files are scanned. Canada, panorama, and hyperlapse subfolders remain outside this project.</p>
         <button class="primary" type="submit" id="scanButton">Create project and scan footage</button>
         <div class="form-status" id="formStatus" role="alert" aria-live="assertive"></div>
-      </form>
+        </form>
+      </div>
+    </section>
+
+    <section class="prepare" id="prepareView" hidden aria-labelledby="prepareTitle">
+      <div class="prepare-intro">
+        <p class="eyebrow" id="prepareProjectLabel">Local project</p>
+        <h1 id="prepareTitle">From library to editable film.</h1>
+        <p class="lede">The app first finds sustained moments at low resolution. You make the editorial decisions. Those exact source ranges become storyboard drafts and, ultimately, a DaVinci Resolve timeline linked to the untouched originals.</p>
+        <p class="library-path" id="libraryPath"></p>
+      </div>
+      <div class="workflow" aria-label="Project workflow">
+        <div class="workflow-step" data-step="library"><span>1</span><div><strong>Library scanned</strong><p>Read metadata without copying or changing originals.</p></div></div>
+        <div class="workflow-step" data-step="prepare"><span>2</span><div><strong>Prepare overnight</strong><p>Rank 4–10 second moments and create disposable 360p review media.</p></div></div>
+        <div class="workflow-step" data-step="review"><span>3</span><div><strong>Review for 15–20 minutes</strong><p>Keep, Maybe or Skip. Every choice retains its exact source range.</p></div></div>
+        <div class="workflow-step" data-step="assembly"><span>4</span><div><strong>Storyboard and Resolve handoff</strong><p>Build 90-second, two-minute and three-minute drafts before precision finishing.</p></div></div>
+      </div>
+      <div class="preparation-panel">
+        <div>
+          <p class="form-kicker">Unattended preparation</p>
+          <h2 id="preparationHeading">Ready to prepare</h2>
+          <p id="preparationMessage">Leave the Mac plugged in with this app open. It is safe to leave running overnight.</p>
+          <p class="current-file" id="currentFile"></p>
+        </div>
+        <div class="progress-track" id="progressTrack" role="progressbar" aria-label="Preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progressBar"></span></div>
+        <div class="progress-meta"><span id="progressCount">Not started</span><span id="progressPercent">0%</span></div>
+        <div class="prepare-actions">
+          <button class="primary" type="button" id="startPreparationButton">Start overnight preparation</button>
+          <button type="button" id="beginReviewButton" hidden>Begin review</button>
+          <button class="text-button" type="button" id="cancelPreparationButton" hidden>Pause safely</button>
+        </div>
+      </div>
     </section>
 
     <section class="review" id="reviewView" hidden aria-labelledby="candidateTitle">
@@ -97,8 +140,9 @@
       <p id="completeSummary"></p>
       <div class="completion-note">
         <span>Next</span>
-        <strong>Build the 90-second, two-minute, and three-minute storyboard drafts.</strong>
+        <strong>Your exact source ranges are ready for the 90-second, two-minute and three-minute storyboard drafts, followed by the DaVinci Resolve handoff.</strong>
       </div>
+      <button type="button" class="text-button" id="completeProjectsButton">Return to projects</button>
     </section>
 
     <section class="error-panel" id="errorView" hidden role="alert">

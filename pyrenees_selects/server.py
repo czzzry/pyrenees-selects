@@ -5,6 +5,7 @@ import json
 import mimetypes
 import re
 import threading
+import uuid
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
@@ -58,13 +59,18 @@ class Application:
     store: Store
     default_source: str = ""
 
-    def state(self) -> dict[str, Any]:
+    def state(self, project_id: str | None = None) -> dict[str, Any]:
         projects = self.store.projects()
         if not projects:
-            return {"project": None, "summary": None, "candidate": None, "default_source": self.default_source}
-        project = projects[0]
+            return {"project": None, "projects": [], "summary": None, "candidate": None, "default_source": self.default_source}
+        selected_id = project_id or self.store.setting("active_project_id")
+        project = self.store.project(selected_id) if selected_id else None
+        if not project:
+            project = projects[0]
+        self.store.set_setting("active_project_id", project["id"])
         return {
             "project": project,
+            "projects": projects,
             "summary": self.store.summary(project["id"]),
             "candidate": self.candidate_payload(self.store.next_candidate(project["id"])),
             "default_source": self.default_source,
@@ -75,10 +81,21 @@ class Application:
         source = Path(source_dir).expanduser().resolve(strict=True)
         if not source.is_dir():
             raise ValueError("Choose an existing footage folder.")
-        return self.store.upsert_project(PROJECT_ID, safe_name, str(source))
+        existing = next((project for project in self.store.projects() if project["source_dir"] == str(source)), None)
+        project_id = existing["id"] if existing else f"project-{uuid.uuid4().hex[:12]}"
+        project = self.store.upsert_project(project_id, safe_name, str(source))
+        self.store.set_setting("active_project_id", project_id)
+        return project
 
-    def scan(self, project_id: str = PROJECT_ID) -> dict[str, Any]:
-        return scan_project(self.store, project_id or PROJECT_ID)
+    def open_project(self, project_id: str) -> dict[str, Any]:
+        if not self.store.project(project_id):
+            raise KeyError(project_id)
+        self.store.set_setting("active_project_id", project_id)
+        return self.state(project_id)
+
+    def scan(self, project_id: str = "") -> dict[str, Any]:
+        selected = project_id or self.store.setting("active_project_id") or PROJECT_ID
+        return scan_project(self.store, selected)
 
     def decide(self, candidate_id: int, decision: str, story_role: str | None = None) -> dict[str, Any]:
         candidate = self.store.decide(candidate_id, decision, story_role)
@@ -131,7 +148,7 @@ class Application:
 
 def handler_factory(application: Application) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
-        server_version = "PyreneesSelects/0.1"
+        server_version = "PyreneesSelects/0.2"
 
         def log_message(self, format: str, *args: Any) -> None:
             print(f"[{self.log_date_time_string()}] {format % args}")
@@ -257,8 +274,11 @@ def handler_factory(application: Application) -> type[BaseHTTPRequestHandler]:
                     )
                     self._json({"project": project}, HTTPStatus.CREATED)
                     return
+                if path == "/api/projects/open":
+                    self._json(application.open_project(str(payload.get("project_id") or "")))
+                    return
                 if path == "/api/scan":
-                    project_id = str(payload.get("project_id") or PROJECT_ID)
+                    project_id = str(payload.get("project_id") or "")
                     self._json(application.scan(project_id))
                     return
                 match = re.fullmatch(r"/api/candidates/(\d+)/decision", path)

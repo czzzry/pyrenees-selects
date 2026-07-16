@@ -30,17 +30,17 @@ The review proxy is not the edit decision. It can be deleted and regenerated fro
 
 Review clips and context frames live under the application data directory. Cache keys include the resolved source path, file size, nanosecond modification time, source range, asset kind, and rendering-policy version.
 
-The initial review clip is H.264 at 360p with no audio. This keeps the 192-minute HEVC archive usable on the Intel Mac while retaining the original 4K media for Resolve.
+The initial review clip is H.264 at 360p with no audio. This keeps the 192-minute HEVC archive usable on the Intel Mac while retaining the original 4K media for Resolve. Unattended preparation is resumable at file boundaries, records progress outside the footage folder, and holds a macOS power assertion only while work is active.
 
 ## Current Vertical Slice
 
-The first slice scans real metadata, persists a single sustained baseline candidate per source, lazily renders review assets, and records decisions. Baseline candidate placement is intentionally transparent and is not represented as intelligent highlight ranking.
+The current slice scans real metadata, sparsely analyzes 160×90 frames with VideoToolbox acceleration on macOS, persists one scored sustained candidate per source, prepares review assets, and records decisions. The score combines exposure, visible detail, scenic movement, and within-shot continuity. It is an intentionally inspectable heuristic, not a semantic vision model.
 
-The next engineering slice must replace baseline placement with sparse technical and visual analysis validated against a manually labeled Pyrenees subset. It should preserve the candidate and UI contracts rather than rewriting the product shell.
+The next engineering slice must calibrate those signals against a manually labeled Pyrenees subset and add cross-source novelty before assembly. It should preserve the candidate and UI contracts rather than rewriting the product shell.
 
 ## Deferred
 
-- Sparse scoring and cross-source novelty.
+- Cross-source novelty and calibration.
 - Background job progress and cancellation.
 - Guide-track analysis.
 - Storyboard duration variants.

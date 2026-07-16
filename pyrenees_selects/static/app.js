@@ -2,6 +2,7 @@
 
 const elements = {
   setup: document.getElementById("setupView"),
+  prepare: document.getElementById("prepareView"),
   review: document.getElementById("reviewView"),
   complete: document.getElementById("completeView"),
   error: document.getElementById("errorView"),
@@ -9,11 +10,28 @@ const elements = {
   loadingMessage: document.getElementById("loadingMessage"),
   main: document.getElementById("main"),
   reviewCount: document.getElementById("reviewCount"),
+  projectsButton: document.getElementById("projectsButton"),
+  completeProjectsButton: document.getElementById("completeProjectsButton"),
+  projectListSection: document.getElementById("projectListSection"),
+  projectList: document.getElementById("projectList"),
   projectForm: document.getElementById("projectForm"),
+  projectName: document.getElementById("projectName"),
   sourceDir: document.getElementById("sourceDir"),
   chooseFolderButton: document.getElementById("chooseFolderButton"),
   scanButton: document.getElementById("scanButton"),
   formStatus: document.getElementById("formStatus"),
+  prepareProjectLabel: document.getElementById("prepareProjectLabel"),
+  libraryPath: document.getElementById("libraryPath"),
+  preparationHeading: document.getElementById("preparationHeading"),
+  preparationMessage: document.getElementById("preparationMessage"),
+  currentFile: document.getElementById("currentFile"),
+  progressTrack: document.getElementById("progressTrack"),
+  progressBar: document.getElementById("progressBar"),
+  progressCount: document.getElementById("progressCount"),
+  progressPercent: document.getElementById("progressPercent"),
+  startPreparationButton: document.getElementById("startPreparationButton"),
+  beginReviewButton: document.getElementById("beginReviewButton"),
+  cancelPreparationButton: document.getElementById("cancelPreparationButton"),
   video: document.getElementById("candidateVideo"),
   contextOne: document.getElementById("contextOne"),
   contextTwo: document.getElementById("contextTwo"),
@@ -39,6 +57,7 @@ let busy = false;
 let desktopMode = false;
 let currentVideoUrl = null;
 let initialLoadStarted = false;
+let preparationPoll = null;
 const desktopExpected = new URLSearchParams(window.location.search).get("desktop") === "1";
 
 function activateDesktop() {
@@ -59,7 +78,7 @@ elements.chooseFolderButton.addEventListener("click", async () => {
 });
 
 function setView(name) {
-  for (const key of ["setup", "review", "complete", "error"]) {
+  for (const key of ["setup", "prepare", "review", "complete", "error"]) {
     elements[key].hidden = key !== name;
   }
 }
@@ -79,7 +98,11 @@ async function request(url, options = {}) {
     if (url === "/api/projects") {
       return window.pywebview.api.create_project(payload.name, payload.source_dir);
     }
+    if (url === "/api/projects/open") return window.pywebview.api.open_project(payload.project_id);
     if (url === "/api/scan") return window.pywebview.api.scan(payload.project_id);
+    if (url === "/api/preparation/status") return window.pywebview.api.preparation_status(payload.project_id);
+    if (url === "/api/preparation/start") return window.pywebview.api.start_preparation(payload.project_id);
+    if (url === "/api/preparation/cancel") return window.pywebview.api.cancel_preparation();
     const decisionMatch = url.match(/^\/api\/candidates\/(\d+)\/decision$/);
     if (decisionMatch) {
       return window.pywebview.api.decide(Number(decisionMatch[1]), payload.decision, payload.story_role || null);
@@ -188,6 +211,104 @@ function showError(error) {
   elements.errorMessage.textContent = error instanceof Error ? error.message : String(error);
 }
 
+function renderProjectList() {
+  const projects = state.projects || [];
+  elements.projectListSection.hidden = projects.length === 0;
+  elements.projectList.replaceChildren();
+  for (const project of projects) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "project-row";
+    button.dataset.projectId = project.id;
+    const name = document.createElement("strong");
+    name.textContent = project.name;
+    const path = document.createElement("span");
+    path.textContent = project.source_dir;
+    button.append(name, path);
+    button.addEventListener("click", () => openProject(project.id));
+    elements.projectList.append(button);
+  }
+}
+
+async function openProject(projectId) {
+  setBusy(true, "Opening project…");
+  try {
+    state = await request("/api/projects/open", {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    updateSummary(state.summary);
+    await renderPreparation();
+    setBusy(false);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function preparationPercent(status) {
+  if (!status?.total) return 0;
+  return Math.max(0, Math.min(100, Math.round((Number(status.processed) / Number(status.total)) * 100)));
+}
+
+function displayPreparationStatus(status) {
+  const percent = preparationPercent(status);
+  const running = status.state === "running";
+  const complete = status.state === "complete";
+  const blocked = status.state === "blocked";
+  const analyzed = Number(state.summary?.analyzed_count || 0);
+  const totalClips = Number(state.summary?.media_count || 0);
+  const resumable = analyzed > 0 || ["interrupted", "failed"].includes(status.state);
+  elements.progressBar.style.width = `${percent}%`;
+  elements.progressTrack.setAttribute("aria-valuenow", String(percent));
+  elements.progressPercent.textContent = `${percent}%`;
+  elements.progressCount.textContent = status.total ? `${status.processed || 0} of ${status.total} preparation tasks` : `${analyzed} of ${totalClips} clips analyzed`;
+  elements.currentFile.textContent = status.current_file ? `Now processing: ${status.current_file}` : "";
+  elements.preparationMessage.textContent = status.message || "Leave the Mac plugged in with this app open. It is safe to leave running overnight.";
+  elements.preparationHeading.textContent = complete ? "Ready for review" : running ? (status.stage === "proxies" ? "Preparing the review queue" : "Finding sustained moments") : resumable ? "Ready to resume" : "Ready to prepare";
+  elements.startPreparationButton.hidden = running || complete || blocked;
+  elements.startPreparationButton.textContent = resumable ? "Resume overnight preparation" : "Start overnight preparation";
+  elements.cancelPreparationButton.hidden = !running;
+  elements.beginReviewButton.hidden = !complete;
+  document.querySelector('[data-step="prepare"]').classList.toggle("is-current", running);
+  document.querySelector('[data-step="prepare"]').classList.toggle("is-complete", complete);
+  if (running && !preparationPoll) {
+    preparationPoll = setInterval(refreshPreparationStatus, 2000);
+  }
+  if (!running && preparationPoll) {
+    clearInterval(preparationPoll);
+    preparationPoll = null;
+  }
+}
+
+async function refreshPreparationStatus() {
+  if (!state.project || !desktopMode) return;
+  try {
+    const status = await request("/api/preparation/status", {
+      method: "POST",
+      body: JSON.stringify({ project_id: state.project.id }),
+    });
+    displayPreparationStatus(status);
+    if (status.state === "complete") {
+      const refreshed = await request("/api/state");
+      state = refreshed;
+      updateSummary(state.summary);
+    }
+  } catch (error) {
+    displayPreparationStatus({ state: "failed", message: String(error) });
+  }
+}
+
+async function renderPreparation() {
+  setView("prepare");
+  elements.prepareProjectLabel.textContent = state.project?.name || "Local project";
+  elements.libraryPath.textContent = state.project?.source_dir || "";
+  if (!desktopMode) {
+    displayPreparationStatus({ state: "idle", message: "Overnight preparation is available in the installed Mac app." });
+    return;
+  }
+  await refreshPreparationStatus();
+}
+
 async function loadState() {
   setBusy(true);
   try {
@@ -195,10 +316,11 @@ async function loadState() {
     elements.sourceDir.value = state.project?.source_dir || state.default_source || "";
     updateSummary(state.summary);
     if (!state.project || !state.summary?.media_count) {
+      renderProjectList();
       setView("setup");
       elements.scanButton.textContent = state.project ? "Scan footage" : "Create project and scan footage";
     } else {
-      renderCandidate(state.candidate);
+      await renderPreparation();
     }
     setBusy(false);
   } catch (error) {
@@ -216,7 +338,7 @@ elements.projectForm.addEventListener("submit", async event => {
   try {
     const created = await request("/api/projects", {
       method: "POST",
-      body: JSON.stringify({ name: "Pyrenees 2024", source_dir: sourceDir }),
+      body: JSON.stringify({ name: elements.projectName.value.trim() || "Untitled journey", source_dir: sourceDir }),
     });
     state.project = created.project;
     const scanned = await request("/api/scan", {
@@ -227,7 +349,7 @@ elements.projectForm.addEventListener("submit", async event => {
     const refreshed = await request("/api/state");
     state = refreshed;
     updateSummary(state.summary);
-    renderCandidate(state.candidate);
+    await renderPreparation();
     setBusy(false);
   } catch (error) {
     elements.formStatus.textContent = error.message;
@@ -236,6 +358,53 @@ elements.projectForm.addEventListener("submit", async event => {
       elements.sourceDir.focus();
     }
     setBusy(false);
+  }
+});
+
+function showProjects() {
+  if (preparationPoll) {
+    clearInterval(preparationPoll);
+    preparationPoll = null;
+  }
+  renderProjectList();
+  elements.sourceDir.value = "";
+  elements.formStatus.textContent = "";
+  setView("setup");
+}
+
+elements.projectsButton.addEventListener("click", showProjects);
+elements.completeProjectsButton.addEventListener("click", showProjects);
+
+elements.startPreparationButton.addEventListener("click", async () => {
+  if (!state.project) return;
+  elements.startPreparationButton.disabled = true;
+  try {
+    const status = await request("/api/preparation/start", {
+      method: "POST",
+      body: JSON.stringify({ project_id: state.project.id }),
+    });
+    displayPreparationStatus(status);
+  } catch (error) {
+    displayPreparationStatus({ state: "failed", message: error instanceof Error ? error.message : String(error) });
+  } finally {
+    elements.startPreparationButton.disabled = false;
+  }
+});
+
+elements.cancelPreparationButton.addEventListener("click", async () => {
+  await request("/api/preparation/cancel", { method: "POST", body: "{}" });
+  elements.preparationMessage.textContent = "Pausing after the current safe checkpoint…";
+});
+
+elements.beginReviewButton.addEventListener("click", async () => {
+  setBusy(true, "Opening the prepared review queue…");
+  try {
+    state = await request("/api/state");
+    updateSummary(state.summary);
+    renderCandidate(state.candidate);
+    setBusy(false);
+  } catch (error) {
+    showError(error);
   }
 });
 

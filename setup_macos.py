@@ -19,7 +19,7 @@ static_files = sorted((ROOT / "pyrenees_selects" / "static").iterdir())
 
 setup(
     name="Pyrenees Selects",
-    version="0.1.0",
+    version="0.2.0",
     app=[str(ROOT / "macos_launcher.py")],
     packages=["pyrenees_selects"],
     data_files=[
@@ -52,8 +52,8 @@ setup(
                 "CFBundleDisplayName": "Pyrenees Selects",
                 "CFBundleIdentifier": "com.cezarybaraniecki.pyreneesselects",
                 "CFBundleName": "Pyrenees Selects",
-                "CFBundleShortVersionString": "0.1.0",
-                "CFBundleVersion": "1",
+                "CFBundleShortVersionString": "0.2.0",
+                "CFBundleVersion": "2",
                 "LSApplicationCategoryType": "public.app-category.video",
                 "LSMinimumSystemVersion": "12.0",
                 "NSHighResolutionCapable": True,

@@ -39,12 +39,17 @@ CREATE TABLE IF NOT EXISTS candidates (
     chapter TEXT NOT NULL,
     reason TEXT NOT NULL,
     score REAL NOT NULL DEFAULT 0,
+    analysis_version INTEGER NOT NULL DEFAULT 0,
     decision TEXT NOT NULL DEFAULT 'pending' CHECK(decision IN ('pending','keep','maybe','skip')),
     story_role TEXT CHECK(story_role IS NULL OR story_role IN ('opening','transition','peak','ending')),
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS media_project_capture_idx ON media(project_id, captured_at);
 CREATE INDEX IF NOT EXISTS candidate_decision_idx ON candidates(decision, id);
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -58,6 +63,9 @@ class Store:
         self.database.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             connection.executescript(SCHEMA)
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(candidates)").fetchall()}
+            if "analysis_version" not in columns:
+                connection.execute("ALTER TABLE candidates ADD COLUMN analysis_version INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -90,6 +98,18 @@ class Store:
         with self.connection() as connection:
             rows = connection.execute("SELECT * FROM projects ORDER BY updated_at DESC").fetchall()
         return [dict(row) for row in rows]
+
+    def setting(self, key: str) -> str | None:
+        with self.connection() as connection:
+            row = connection.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                "INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
 
     def replace_media(self, project_id: str, media_items: list[dict[str, Any]]) -> None:
         with self.connection() as connection:
@@ -135,6 +155,36 @@ class Store:
                     ),
                 )
 
+    def project_candidates(self, project_id: str) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            rows = connection.execute(
+                """SELECT c.*,m.project_id,m.path,m.filename,m.captured_at,m.width,m.height,m.fps,m.codec,m.size_bytes,
+                          m.duration source_duration
+                   FROM candidates c JOIN media m ON m.id=c.media_id
+                   WHERE m.project_id=? ORDER BY m.captured_at,c.id""",
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_candidate_analysis(
+        self,
+        candidate_id: int,
+        start_seconds: float,
+        duration: float,
+        reason: str,
+        score: float,
+        analysis_version: int,
+    ) -> None:
+        with self.connection() as connection:
+            result = connection.execute(
+                """UPDATE candidates
+                   SET start_seconds=?, duration=?, reason=?, score=?, analysis_version=?, updated_at=?
+                   WHERE id=? AND decision='pending'""",
+                (start_seconds, duration, reason, score, analysis_version, utc_now(), candidate_id),
+            )
+            if result.rowcount not in {0, 1}:
+                raise RuntimeError("Could not update analyzed candidate.")
+
     def summary(self, project_id: str) -> dict[str, Any]:
         with self.connection() as connection:
             media = connection.execute(
@@ -150,7 +200,17 @@ class Store:
         return {
             "media_count": media["count"], "source_duration": media["duration"], "source_size_bytes": media["size_bytes"],
             "decisions": {key: decision_map.get(key, {"count": 0, "duration": 0}) for key in ("pending", "keep", "maybe", "skip")},
+            "analyzed_count": self._analyzed_count(project_id),
         }
+
+    def _analyzed_count(self, project_id: str) -> int:
+        with self.connection() as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) count FROM candidates c JOIN media m ON m.id=c.media_id
+                   WHERE m.project_id=? AND c.analysis_version > 0""",
+                (project_id,),
+            ).fetchone()
+        return int(row["count"])
 
     def candidate(self, candidate_id: int) -> dict[str, Any] | None:
         with self.connection() as connection:

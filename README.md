@@ -46,19 +46,20 @@ The legacy implementation remains recoverable in Git history. There is no `legac
 
 The clean-slate vertical slice currently:
 
-- creates a folder-backed local project;
+- creates, resumes, and switches between folder-backed local projects;
 - scans only top-level `.mp4`, `.mov`, and `.m4v` files;
 - reads capture time, duration, codec, dimensions, frame rate, and size with `ffprobe`;
 - stores metadata and decisions in SQLite outside both the repository and footage folder;
-- creates one transparent baseline candidate per source;
-- generates 360p H.264 review clips and two context frames only when requested;
+- runs resumable unattended preparation while preventing the Mac from sleeping;
+- sparsely samples low-resolution frames to select a sustained eight-second range from each source using exposure, visible detail, movement, and continuity signals;
+- pre-generates 360p H.264 review clips and two context frames in the disposable cache;
 - provides the editorial contact-print screening interface;
 - records Keep, Maybe, Skip, optional story roles, keyboard controls, and undo;
 - binds only to localhost and never serves arbitrary source paths.
 
-On the real archive, all 79 Pyrenees videos scan successfully. The first baseline queue contains just under ten minutes of review footage.
+On the real archive, all 79 Pyrenees videos scan successfully. The prepared queue contains just under eleven minutes of review footage.
 
-> **Current honesty boundary:** candidate placement is a workflow baseline, not finished highlight intelligence. Sparse technical and visual ranking is the next engineering slice.
+> **Current honesty boundary:** sparse scoring selects a promising sustained range within each source. Cross-source novelty, calibrated recall, storyboard assembly, and Resolve export remain subsequent engineering slices.
 
 ## Run it
 
@@ -107,7 +108,9 @@ python3 -m pyrenees_selects \
 
 ### 3. Screen the candidates
 
-Create the project and scan the folder. Metadata scanning does not transcode the archive. Review media is generated lazily when a candidate appears.
+Create the project and scan the folder. Metadata scanning does not transcode the archive. Start **overnight preparation**, leave the Mac plugged in with the app open, and return when the project says **Ready for review**. Work is checkpointed after every file and can be resumed safely.
+
+Preparation decodes sparse 160×90 samples, stores only its scores and exact source ranges, and creates disposable 360p review media under Application Support. It never writes to the footage library. On the target Mac, a 26-minute 4K HEVC source was benchmarked at roughly six times real time using VideoToolbox; the full archive is comfortably an unattended job, though exact runtime depends on thermals and other activity.
 
 | Key | Decision |
 |---|---|
@@ -152,8 +155,8 @@ Compare the result with free DJI LightCut using processing time, active human ti
 
 ## Next engineering slices
 
-1. **Sparse Pyrenees analysis** — evaluate exposure, sharpness, sustained motion, stability, scene change, and cross-source novelty at very low resolution.
-2. **Candidate calibration** — label a representative subset and measure precision and recall rather than tuning by vibes.
+1. **Candidate calibration** — label a representative subset and measure precision and recall rather than tuning by vibes.
+2. **Cross-source novelty** — reduce repetitive mountain views while preserving the geographic journey.
 3. **Storyboard assembly** — build coherent duration variants with a loose coast-to-mountains-to-ending journey arc.
 4. **Resolve handoff** — export non-destructive editorial ranges with handles.
 5. **LightCut benchmark** — run the same representative footage through the free comparison product and publish the results.

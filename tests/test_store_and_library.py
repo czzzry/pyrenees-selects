@@ -35,6 +35,17 @@ class StoreAndLibraryTests(unittest.TestCase):
         candidate = self.store.next_candidate(PROJECT_ID)
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate["decision"], "pending")
+        self.assertEqual(result["summary"]["analyzed_count"], 0)
+
+        self.store.update_candidate_analysis(candidate["id"], 12.0, 8.0, "Balanced exposure.", 0.82, 1)
+        analyzed = self.store.candidate(candidate["id"])
+        self.assertEqual(analyzed["start_seconds"], 12.0)
+        self.assertEqual(analyzed["analysis_version"], 1)
+        self.assertEqual(self.store.summary(PROJECT_ID)["analyzed_count"], 1)
+
+    def test_settings_persist_the_active_project(self) -> None:
+        self.store.set_setting("active_project_id", PROJECT_ID)
+        self.assertEqual(self.store.setting("active_project_id"), PROJECT_ID)
 
     def test_decision_persists_and_advances_queue(self) -> None:
         source = self.source / "DJI_20240609090000_0001_D.MP4"

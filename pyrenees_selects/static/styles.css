@@ -28,6 +28,8 @@ button { cursor: pointer; }
 .wordmark { color: var(--ink); text-decoration: none; font-family: Georgia, "Times New Roman", serif; font-size: clamp(20px, 2vw, 28px); font-weight: 700; letter-spacing: -.035em; }
 .edition { text-transform: uppercase; letter-spacing: .16em; font-size: 10px; font-weight: 750; }
 .review-count { justify-self: end; font-variant-numeric: tabular-nums; font-size: 12px; }
+.masthead-actions { justify-self: end; display: flex; align-items: center; gap: 16px; }
+.text-button { min-height: 36px; border: 0; border-bottom: 1px solid currentColor; background: transparent; padding: 0; color: var(--ink); font-size: 11px; font-weight: 750; }
 
 main { padding: 30px 28px 90px; }
 .eyebrow, .label, .form-kicker { margin: 0; color: var(--muted); text-transform: uppercase; letter-spacing: .14em; font-size: 10px; font-weight: 850; }
@@ -41,8 +43,10 @@ h1, h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; lette
 .dataset-facts dt { font-family: Georgia, "Times New Roman", serif; font-size: 32px; }
 .dataset-facts dd { margin: 0; color: var(--muted); font-size: 11px; }
 .project-form { background: var(--paper-deep); padding: 26px; border-top: 5px solid var(--ink); box-shadow: 0 18px 48px rgba(42, 37, 25, .08); }
+.setup-panel { min-width: 0; }
 .project-form h2 { margin: 8px 0 34px; font-size: 42px; }
 .project-form label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 800; }
+.project-form label:not(:first-of-type) { margin-top: 18px; }
 .project-form input { width: 100%; min-height: 44px; padding: 13px 11px; border: 1px solid #8e8a80; background: var(--input); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .folder-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
 .folder-field button { min-height: 44px; border: 1px solid #8e8a80; border-left: 0; background: var(--ink); color: white; padding: 0 15px; font-size: 12px; font-weight: 800; }
@@ -50,6 +54,37 @@ h1, h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; lette
 .field-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .primary { width: 100%; min-height: 44px; margin-top: 18px; border: 1px solid var(--ink); background: var(--acid); color: var(--ink); padding: 14px; font-size: 12px; font-weight: 850; }
 .form-status { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+.project-list { border-top: 2px solid var(--ink); }
+#projectListSection h2 { margin: 8px 0 22px; font-size: 38px; }
+.project-row { width: 100%; min-height: 70px; display: grid; gap: 5px; border: 0; border-bottom: 1px solid var(--soft-rule); background: transparent; padding: 13px 4px; text-align: left; }
+.project-row:hover { background: rgba(23, 26, 22, .05); }
+.project-row strong { font-family: Georgia, "Times New Roman", serif; font-size: 20px; font-weight: 400; }
+.project-row span { overflow: hidden; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.section-rule { margin: 28px 0; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.section-rule::before, .section-rule::after { content: ""; flex: 1; height: 1px; background: var(--soft-rule); }
+
+.prepare { max-width: 1380px; margin: 22px auto 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(350px, .75fr); gap: 34px 80px; align-items: start; }
+.prepare-intro h1 { max-width: 790px; margin: 14px 0 20px; font-size: 74px; line-height: .94; }
+.prepare-intro .lede { font-size: 20px; }
+.library-path { max-width: 740px; overflow: hidden; border-top: 1px solid var(--soft-rule); margin: 28px 0 0; padding-top: 11px; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.workflow { grid-column: 2; grid-row: 1 / span 2; border-top: 5px solid var(--ink); }
+.workflow-step { display: grid; grid-template-columns: 38px 1fr; gap: 13px; border-bottom: 1px solid var(--soft-rule); padding: 18px 2px; opacity: .58; }
+.workflow-step:first-child, .workflow-step.is-current, .workflow-step.is-complete { opacity: 1; }
+.workflow-step > span { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ink); border-radius: 50%; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.workflow-step.is-current > span { background: var(--acid); }
+.workflow-step.is-complete > span, .workflow-step:first-child > span { background: var(--ink); color: white; }
+.workflow-step strong { font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 400; }
+.workflow-step p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.preparation-panel { grid-column: 1; background: var(--paper-deep); border-top: 5px solid var(--ink); padding: 24px 26px 26px; }
+.preparation-panel h2 { margin: 7px 0 9px; font-size: 36px; }
+.preparation-panel p { max-width: 650px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.preparation-panel .current-file { min-height: 18px; overflow: hidden; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.progress-track { height: 8px; overflow: hidden; background: #cbc5b7; }
+.progress-track span { display: block; width: 0; height: 100%; background: var(--acid); transition: width 220ms cubic-bezier(.22, 1, .36, 1); }
+.progress-meta { display: flex; justify-content: space-between; margin-top: 8px; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prepare-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 8px; }
+.prepare-actions .primary { width: auto; min-width: 240px; }
+#beginReviewButton { min-height: 44px; margin-top: 18px; border: 1px solid var(--ink); background: var(--acid); padding: 12px 20px; font-weight: 850; }
 
 .review { max-width: 1500px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(310px, .65fr); gap: clamp(28px, 5vw, 82px); }
 .contact-sheet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(190px, 1fr)); gap: 8px; min-height: min(670px, calc(100vh - 155px)); }
@@ -98,10 +133,13 @@ button:disabled { cursor: wait; opacity: .55; }
   .masthead { margin: 0 16px; grid-template-columns: 1fr auto; }
   .edition { display: none; }
   main { padding: 22px 16px 90px; }
-  .setup, .review { grid-template-columns: 1fr; }
+  .setup, .prepare, .review { grid-template-columns: 1fr; }
   .setup { gap: 46px; }
   .setup h1 { font-size: clamp(50px, 15vw, 82px); }
   .project-form { max-width: 620px; }
+  .prepare-intro h1 { font-size: 58px; }
+  .workflow { grid-column: 1; grid-row: auto; }
+  .preparation-panel { grid-column: 1; }
   .contact-sheet { min-height: 440px; grid-template-rows: 2fr 1fr; }
   .candidate-copy h1 { font-size: clamp(42px, 12vw, 68px); }
   .decision-actions { margin-top: 24px; position: sticky; bottom: 8px; background: var(--paper); padding: 8px 0; z-index: 5; }
