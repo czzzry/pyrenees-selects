@@ -26,22 +26,6 @@ Watching every source file is the expensive part. This project therefore concent
 
 It is reusable by construction, but deliberately **not generalized in advance**. The engineering target is the real Pyrenees 2024 archive on a 2020 Intel MacBook Pro with 16 GB of memory. Other cameras, genres, teams, and cloud workflows can wait until this dataset works exceptionally well.
 
-## The failed first version
-
-The original repository tried to become an “AI video editor” before it understood the useful job. It accumulated music-library management, color controls, automatic montage generation, experimental subject crops, remote-compute packaging, diagnostics, and a seven-tab Streamlit interface.
-
-Most of that behavior lived in a single **2,094-line `app.py`**. The product scope was too broad and the architecture made every experiment harder to trust. It could generate things, but it did not provide a convincing path from a repetitive archive to an intentional film.
-
-The rewrite keeps the lesson and discards the implementation:
-
-- the real bottleneck is footage triage, not another editing timeline;
-- a promising moment must remain a source range, not become an orphaned rendered file;
-- sustained shots and neighboring-shot compatibility matter more than attractive individual frames;
-- automation should reduce review while leaving editorial judgment visible;
-- honest baselines are more useful than pretending a heuristic is intelligent.
-
-The legacy implementation remains recoverable in Git history. There is no `legacy/` folder inside the current product.
-
 ## What works today
 
 The clean-slate vertical slice currently:
@@ -148,6 +132,22 @@ By default on macOS, metadata and disposable review assets live under:
 The configured source folder is read-only input. Deleting the application-data folder removes the database and proxies; it does not touch the original footage.
 
 No video file is tracked in this repository. The train image above is a single compressed documentation still included with the repository owner’s explicit permission.
+
+## What changed from the first version
+
+The original repository tried to become an “AI video editor” before it understood the useful job. It accumulated music-library management, color controls, automatic montage generation, experimental subject crops, remote-compute packaging, diagnostics, and a seven-tab Streamlit interface.
+
+Most of that behavior lived in a single **2,094-line `app.py`**. The product scope was too broad and the architecture made every experiment harder to trust. It could generate things, but it did not provide a convincing path from a repetitive archive to an intentional film.
+
+The rewrite keeps the lesson and discards the implementation:
+
+- the real bottleneck is footage triage, not another editing timeline;
+- a promising moment must remain a source range, not become an orphaned rendered file;
+- sustained shots and neighboring-shot compatibility matter more than attractive individual frames;
+- automation should reduce review while leaving editorial judgment visible;
+- honest baselines are more useful than pretending a heuristic is intelligent.
+
+The legacy implementation remains recoverable in Git history. There is no `legacy/` folder inside the current product.
 
 ## Product direction
 
