@@ -63,6 +63,18 @@ On the real archive, all 79 Pyrenees videos scan successfully. The prepared queu
 
 ## Run it
 
+### One-command synthetic demo
+
+Reviewers can explore the current screening flow without drone footage:
+
+```bash
+make demo
+```
+
+The command generates four tiny moving test-pattern clips under `.demo/`, scans them into an isolated local database, and opens the screening room at [http://localhost:8741](http://localhost:8741). It uses no personal media, makes no network request, and never writes outside the ignored demo directory.
+
+The synthetic footage is intentionally unmistakable. It proves the scan, metadata, candidate, decision, and local-media paths; it is not presented as evidence that the visual heuristic has been calibrated on arbitrary footage.
+
 ### Mac app — recommended
 
 On the Intel Mac used for this project, build and install the self-contained personal application:
@@ -183,9 +195,7 @@ Read the durable decisions:
 ## Test
 
 ```bash
-python3 -m unittest discover -s tests
-python3 -m compileall -q pyrenees_selects tests
-node --check pyrenees_selects/static/app.js
+make test
 ```
 
 ## Status

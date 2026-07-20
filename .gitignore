@@ -4,6 +4,7 @@ venv/
 build/
 dist/
 .cache/
+.demo/
 raw_footage/
 outputs/
 cache/
