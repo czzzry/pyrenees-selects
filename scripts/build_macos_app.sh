@@ -33,17 +33,19 @@ fi
 [[ "$(shasum -a 256 "$FFPROBE_ZIP" | awk '{print $1}')" == "$FFPROBE_SHA" ]] || { print -u2 "FFprobe checksum failed."; exit 1; }
 
 rm -rf "$ROOT/build" "$ROOT/dist"
-mkdir -p "$ICONSET"
 mkdir -p "$TOOL_DIR"
 unzip -q -o "$FFMPEG_ZIP" -d "$TOOL_DIR"
 unzip -q -o "$FFPROBE_ZIP" -d "$TOOL_DIR"
-sips -s format png "$ICON_SOURCE" --out "$ROOT/build/AppIcon-1024.png" >/dev/null
-for SIZE in 16 32 128 256 512; do
-  sips -z "$SIZE" "$SIZE" "$ROOT/build/AppIcon-1024.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null
-  DOUBLE=$((SIZE * 2))
-  sips -z "$DOUBLE" "$DOUBLE" "$ROOT/build/AppIcon-1024.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$ICON"
+if [[ ! -f "$ICON" ]]; then
+  mkdir -p "$ICONSET"
+  sips -s format png "$ICON_SOURCE" --out "$ROOT/build/AppIcon-1024.png" >/dev/null
+  for SIZE in 16 32 128 256 512; do
+    sips -z "$SIZE" "$SIZE" "$ROOT/build/AppIcon-1024.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null
+    DOUBLE=$((SIZE * 2))
+    sips -z "$DOUBLE" "$DOUBLE" "$ROOT/build/AppIcon-1024.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$ICON"
+fi
 
 cd "$ROOT"
 "$VENV/bin/python" setup_macos.py py2app

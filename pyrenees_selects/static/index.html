@@ -66,7 +66,8 @@
         <div class="workflow-step" data-step="library"><span>1</span><div><strong>Library scanned</strong><p>Read metadata without copying or changing originals.</p></div></div>
         <div class="workflow-step" data-step="prepare"><span>2</span><div><strong>Prepare overnight</strong><p>Rank 4–10 second moments and create disposable 360p review media.</p></div></div>
         <div class="workflow-step" data-step="review"><span>3</span><div><strong>Review for 15–20 minutes</strong><p>Keep, Maybe or Skip. Every choice retains its exact source range.</p></div></div>
-        <div class="workflow-step" data-step="assembly"><span>4</span><div><strong>Storyboard and Resolve handoff</strong><p>Build 90-second, two-minute and three-minute drafts before precision finishing.</p></div></div>
+        <div class="workflow-step" data-step="refine"><span>4</span><div><strong>Refine selected moments</strong><p>Replay Keeps and Maybes and save your editing notes.</p></div></div>
+        <div class="workflow-step" data-step="assembly"><span>5</span><div><strong>Shape the hybrid and hand off</strong><p>Choose which longer-cut shots earn a place, then move the preferred structure into Resolve.</p></div></div>
       </div>
       <div class="preparation-panel">
         <div>
@@ -80,6 +81,9 @@
         <div class="prepare-actions">
           <button class="primary" type="button" id="startPreparationButton">Start overnight preparation</button>
           <button type="button" id="beginReviewButton" hidden>Begin review</button>
+          <button type="button" id="beginRefinementButton" hidden>Refine selected moments</button>
+          <button type="button" id="beginStoryboardButton" hidden>Prepare the two-minute cut</button>
+          <button type="button" id="beginHybridButton" hidden>Choose shots for the hybrid</button>
           <button class="text-button" type="button" id="cancelPreparationButton" hidden>Pause safely</button>
         </div>
       </div>
@@ -91,13 +95,12 @@
           <video id="candidateVideo" controls preload="metadata" playsinline></video>
           <figcaption id="heroFrameNumber">Review proxy · 360p</figcaption>
         </figure>
-        <figure class="context-frame">
-          <img id="contextOne" alt="Earlier context within this candidate sequence">
-          <figcaption>Context 01</figcaption>
-        </figure>
-        <figure class="context-frame">
-          <img id="contextTwo" alt="Later context within this candidate sequence">
-          <figcaption>Context 02</figcaption>
+        <figure class="source-frame">
+          <div class="source-player">
+            <video id="sourceVideo" controls preload="metadata" playsinline></video>
+            <button type="button" id="jumpToSelectionButton">Jump to selected · 00:00</button>
+          </div>
+          <figcaption id="sourceFrameCaption">Full original · scrub freely</figcaption>
         </figure>
       </div>
 
@@ -122,6 +125,13 @@
           <div><dt>Original</dt><dd id="sourceFormat"></dd></div>
         </dl>
 
+        <div class="notes-field review-notes-field">
+          <label for="reviewNote">Comment on this source</label>
+          <p>Ask for a longer or shorter moment, note what matters, or leave an editing thought.</p>
+          <textarea id="reviewNote" maxlength="4000" rows="4" placeholder="For example: start earlier and keep the full turn toward the mountains."></textarea>
+          <div class="save-state" id="reviewNoteSaveState" role="status" aria-live="polite">Comments save locally.</div>
+        </div>
+
         <div class="decision-actions">
           <button type="button" data-decision="skip"><span>Skip</span><kbd>1</kbd></button>
           <button type="button" data-decision="maybe"><span>Maybe</span><kbd>2</kbd></button>
@@ -134,15 +144,201 @@
       </article>
     </section>
 
+    <section class="storyboard-prepare" id="storyboardPrepareView" hidden aria-labelledby="storyboardPrepareTitle">
+      <div class="storyboard-prepare-copy">
+        <p class="eyebrow">Assembly pass · two-minute cut</p>
+        <h1 id="storyboardPrepareTitle">Your first cut is planned.</h1>
+        <p class="lede">Twenty moments trace the journey from the ocean into the high mountains. Your Keeps, Maybes and notes remain exactly as you left them.</p>
+        <dl class="dataset-facts storyboard-facts">
+          <div><dt>20</dt><dd>proposed shots</dd></div>
+          <div><dt>02:00</dt><dd>target cut</dd></div>
+          <div><dt>20–30 min</dt><dd>measured preparation</dd></div>
+        </dl>
+        <div class="bird-reserve">
+          <span>Held aside</span>
+          <p>The bird shot stays available, but its zoom and enhancement test will be scoped separately after the story works.</p>
+        </div>
+      </div>
+
+      <div class="storyboard-prepare-panel">
+        <p class="form-kicker">Disposable review previews</p>
+        <h2 id="storyboardPreparationHeading">Ready when you are</h2>
+        <p id="storyboardPreparationMessage">The Mac will only prepare proposed ranges that changed. You can leave it working and pause safely after the current shot.</p>
+        <p class="current-file" id="storyboardCurrentFile"></p>
+        <div class="progress-track" id="storyboardProgressTrack" role="progressbar" aria-label="Storyboard preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="storyboardProgressBar"></span></div>
+        <div class="progress-meta"><span id="storyboardProgressCount">Not started</span><span id="storyboardProgressPercent">0%</span></div>
+        <div class="compute-note">
+          <strong>No rental needed for this pass.</strong>
+          <span>The first complete run took 21 minutes on this Mac, including the one-time folder permission. Originals remain untouched.</span>
+        </div>
+        <div class="prepare-actions">
+          <button type="button" class="primary" id="startStoryboardPreparationButton">Start preparation</button>
+          <button type="button" id="reviewStoryboardButton" hidden>Review the two-minute cut</button>
+          <button type="button" class="text-button" id="cancelStoryboardPreparationButton" hidden>Pause safely</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="storyboard" id="storyboardView" hidden aria-labelledby="storyboardTitle">
+      <div class="storyboard-screening">
+        <div class="storyboard-progress">
+          <span id="storyboardProgress">Shot 1 of 20</span>
+          <span id="storyboardReviewedCount">0 approved</span>
+        </div>
+        <figure class="storyboard-frame">
+          <video id="storyboardVideo" controls preload="metadata" playsinline></video>
+          <figcaption id="storyboardFrameCaption">Proposed source range · 360p review preview</figcaption>
+        </figure>
+        <div class="storyboard-strip" id="storyboardStrip" aria-label="Two-minute cut shots"></div>
+        <p class="storyboard-strip-key" id="storyboardStripKey"><span></span> Pending &nbsp; <span class="is-approved"></span> Approved &nbsp; <span class="is-removed"></span> Removed</p>
+      </div>
+
+      <article class="storyboard-copy">
+        <div class="preserved-decision">
+          <strong id="storyboardRecommendation">Core</strong>
+          <span id="storyboardGroup">Ocean · proposed edit</span>
+        </div>
+        <p class="refinement-context" id="storyboardContext"></p>
+        <h1 id="storyboardTitle" aria-live="polite">A journey moment</h1>
+
+        <div class="preview-status" aria-label="Preview status">
+          <div>
+            <span>Visible in this preview</span>
+            <strong id="storyboardAppliedTreatment">The proposed start and end points only</strong>
+            <p id="storyboardPreviewNote">Speed, stabilization, smoothing and crops are not visible yet.</p>
+          </div>
+          <div>
+            <span id="storyboardTreatmentLabel">Planned for the treated rough cut</span>
+            <p id="storyboardTreatment"></p>
+          </div>
+        </div>
+
+        <div class="owner-note" id="storyboardOwnerNoteBlock">
+          <span>Your original note from the second pass · preserved</span>
+          <p id="storyboardOwnerNote"></p>
+        </div>
+
+        <div class="storyboard-notes-field">
+          <label for="storyboardNote" id="storyboardNoteLabel">Add a note for this shot</label>
+          <p id="storyboardNoteHelp">This stays separate from your original note and saves automatically.</p>
+          <textarea id="storyboardNote" maxlength="4000" placeholder="For example: this still feels too fast, or hold the mountain view longer."></textarea>
+          <div class="note-tools">
+            <span>Saved locally on this Mac</span>
+            <span class="save-state" id="storyboardNoteSaveState" role="status" aria-live="polite">No additional note</span>
+          </div>
+        </div>
+
+        <dl class="source-facts storyboard-source-facts">
+          <div><dt>Source</dt><dd id="storyboardSource"></dd></div>
+          <div><dt id="storyboardRangeLabel">Proposed</dt><dd id="storyboardRange"></dd></div>
+          <div><dt id="storyboardTargetLabel">Cut</dt><dd id="storyboardTarget"></dd></div>
+        </dl>
+
+        <div class="alternate-picker" id="storyboardAlternatePicker" hidden>
+          <div class="alternate-picker-heading">
+            <div><span>Alternates</span><strong>Choose another moment from this part of the journey.</strong></div>
+            <button type="button" class="text-button" id="cancelStoryboardAlternateButton">Cancel</button>
+          </div>
+          <div class="alternate-list" id="storyboardAlternateList"></div>
+        </div>
+
+        <div class="storyboard-actions" id="storyboardActions">
+          <button type="button" id="removeStoryboardItemButton">Remove from cut</button>
+          <button type="button" id="chooseStoryboardAlternateButton">Choose another shot</button>
+          <button type="button" class="keep" id="approveStoryboardItemButton">Approve shot and planned edits</button>
+        </div>
+        <div class="storyboard-navigation">
+          <button type="button" class="text-button" id="previousStoryboardButton">Previous shot</button>
+          <button type="button" class="text-button" id="nextStoryboardButton">Next shot</button>
+        </div>
+      </article>
+    </section>
+
+    <section class="refine" id="refineView" hidden aria-labelledby="refinementTitle">
+      <div class="refinement-media">
+        <div class="refinement-progress">
+          <span id="refinementProgress">Selection 1 of 1</span>
+          <span id="refinementReviewedCount">0 refined</span>
+        </div>
+        <figure>
+          <video id="refinementVideo" controls preload="metadata" playsinline></video>
+          <figcaption>Selected 360p review preview · originals stay untouched</figcaption>
+        </figure>
+        <div class="selection-window" aria-label="Original selected range">
+          <span>Prepared selection</span>
+          <div class="selection-track"><span id="selectionWindow"></span></div>
+          <strong id="selectionRange"></strong>
+        </div>
+      </div>
+
+      <article class="refinement-copy">
+        <div class="preserved-decision">
+          <strong id="refinementDecision">Keep</strong>
+          <span>Original screening decision · preserved</span>
+        </div>
+        <p class="refinement-context" id="refinementContext"></p>
+        <h1 id="refinementTitle" aria-live="polite"></h1>
+        <p class="candidate-reason" id="refinementReason"></p>
+
+        <dl class="source-facts refinement-source-facts">
+          <div><dt>Source</dt><dd id="refinementSource"></dd></div>
+          <div><dt>Selected</dt><dd id="refinementSelectedRange"></dd></div>
+          <div><dt>Original</dt><dd id="refinementSourceFormat"></dd></div>
+        </dl>
+
+        <div class="notes-field">
+          <label for="refinementNote">Your editing note</label>
+          <p>Write naturally. Describe what you noticed or what would make this shot work.</p>
+          <textarea id="refinementNote" maxlength="4000" rows="6" placeholder="For example: Let the zoom-out continue longer so we reach the full mountain view."></textarea>
+          <div class="note-tools">
+            <button type="button" class="text-button" id="attachMomentButton">Attach current moment</button>
+            <span id="noteAnchorLabel">No moment attached</span>
+          </div>
+          <div class="save-state" id="refinementSaveState" role="status" aria-live="polite">Notes save locally.</div>
+        </div>
+
+        <div class="refinement-navigation">
+          <button type="button" id="previousRefinementButton">Previous</button>
+          <button type="button" class="primary" id="nextRefinementButton">Save and next</button>
+        </div>
+      </article>
+    </section>
+
     <section class="complete" id="completeView" hidden>
       <p class="eyebrow">Screening complete</p>
       <h1>The first pass is in the can.</h1>
       <p id="completeSummary"></p>
       <div class="completion-note">
         <span>Next</span>
-        <strong>Your exact source ranges are ready for the 90-second, two-minute and three-minute storyboard drafts, followed by the DaVinci Resolve handoff.</strong>
+        <strong>Replay your Keeps and Maybes, then leave notes in your own words.</strong>
       </div>
+      <button type="button" class="primary completion-primary" id="refineSelectionsButton">Refine selected moments</button>
       <button type="button" class="text-button" id="completeProjectsButton">Return to projects</button>
+    </section>
+
+    <section class="complete" id="refineCompleteView" hidden>
+      <p class="eyebrow">Selection refinement complete</p>
+      <h1>Your notes are in the edit.</h1>
+      <p id="refineCompleteSummary"></p>
+      <div class="completion-note">
+        <span>Next</span>
+        <strong>These preserved decisions, exact source ranges and editing notes can now shape the storyboard drafts.</strong>
+      </div>
+      <button type="button" class="primary completion-primary" id="prepareStoryboardButton">Prepare the two-minute cut</button>
+      <button type="button" id="reviewRefinementsButton">Review selections again</button>
+      <button type="button" class="text-button" id="refineCompleteProjectsButton">Return to projects</button>
+    </section>
+
+    <section class="complete" id="storyboardCompleteView" hidden>
+      <p class="eyebrow" id="storyboardCompleteEyebrow">Two-minute storyboard complete</p>
+      <h1 id="storyboardCompleteTitle">The journey has a shape.</h1>
+      <p id="storyboardCompleteSummary"></p>
+      <div class="completion-note">
+        <span>Next</span>
+        <strong id="storyboardCompleteNext">Render the treated rough cut with the non-bird speed, smoothing, stabilization and crop changes. The local benchmark estimates about 10–20 minutes; no rental is needed.</strong>
+      </div>
+      <button type="button" class="primary completion-primary" id="reviewStoryboardAgainButton">Review the cut again</button>
+      <button type="button" class="text-button" id="storyboardCompleteProjectsButton">Return to projects</button>
     </section>
 
     <section class="error-panel" id="errorView" hidden role="alert">

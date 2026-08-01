@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Pyrenees Selfie Review</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/selfie-review.css">
+</head>
+<body>
+  <a class="skip-link" href="#reviewWorkspace">Skip to photo review</a>
+
+  <header class="masthead">
+    <div class="wordmark">Pyrenees Selfie Review</div>
+    <div class="progress-copy" id="progressCopy" aria-live="polite">Preparing 307 photos…</div>
+    <dl class="decision-counts" aria-label="Review totals">
+      <div><dt>Included</dt><dd id="includeCount">0</dd></div>
+      <div><dt>Maybe</dt><dd id="maybeCount">0</dd></div>
+      <div><dt>Not included</dt><dd id="excludeCount">0</dd></div>
+    </dl>
+  </header>
+
+  <main id="reviewWorkspace" class="workspace" aria-busy="true">
+    <section class="photo-column" aria-label="Photo under review">
+      <div class="photo-position">
+        <span id="positionCopy">Photo — of 307</span>
+        <span id="currentDecision">Not yet reviewed</span>
+      </div>
+      <figure class="photo-mat">
+        <div class="photo-loading" id="photoLoading">Loading photo…</div>
+        <img id="reviewPhoto" alt="">
+      </figure>
+      <nav class="photo-navigation" aria-label="Move between photos">
+        <button id="previousButton" type="button"><kbd>←</kbd> Previous</button>
+        <button id="nextButton" type="button">Next <kbd>→</kbd></button>
+      </nav>
+    </section>
+
+    <aside class="decision-panel" aria-label="Review this photo">
+      <section class="photo-details">
+        <p id="captureDate">Capture date</p>
+        <p id="filename">Filename</p>
+      </section>
+
+      <section class="comment-field">
+        <label for="comment">Optional note for later fixes</label>
+        <p>Only add a note when something needs attention later.</p>
+        <textarea
+          id="comment"
+          maxlength="2000"
+          placeholder="Closed eyes — can we fix this later?"
+          aria-describedby="commentHelp saveStatus"
+        ></textarea>
+        <div class="comment-meta">
+          <span id="commentHelp">Saved with this photo</span>
+          <span><span id="commentCount">0</span> / 2000</span>
+        </div>
+        <p class="save-status" id="saveStatus" role="status">Saved locally</p>
+      </section>
+
+      <section class="decision-section" aria-labelledby="decisionHeading">
+        <h1 id="decisionHeading">Should this photo be included?</h1>
+        <div class="decision-actions">
+          <button class="decision-button exclude" id="excludeButton" data-decision="exclude" type="button">
+            <kbd>1</kbd><span>Don’t include</span>
+          </button>
+          <button class="decision-button maybe" id="maybeButton" data-decision="maybe" type="button">
+            <kbd>2</kbd><span>Maybe</span>
+          </button>
+          <button class="decision-button include" id="includeButton" data-decision="include" type="button">
+            <kbd>3</kbd><span>Include</span>
+          </button>
+        </div>
+        <button class="undo-button" id="undoButton" type="button" disabled><kbd>U</kbd> Undo last decision</button>
+      </section>
+    </aside>
+  </main>
+
+  <main class="complete-view" id="completeView" hidden>
+    <p class="complete-kicker">Culling pass complete</p>
+    <h1>Every likely selfie has a decision.</h1>
+    <p id="completeSummary"></p>
+    <div class="complete-actions">
+      <button id="reviewIncludedButton" type="button">Review included photos</button>
+      <button id="reviewAllButton" type="button">Review all decisions</button>
+    </div>
+    <p class="complete-state">Comments and decisions are saved locally and remain available for the later editing pass.</p>
+  </main>
+
+  <main class="error-view" id="errorView" hidden>
+    <p class="complete-kicker">Reviewer unavailable</p>
+    <h1>These photos could not be opened.</h1>
+    <p id="errorMessage">Reload the page to try again.</p>
+    <button id="retryButton" type="button">Reload reviewer</button>
+  </main>
+
+  <script src="/selfie-review.js" defer></script>
+</body>
+</html>

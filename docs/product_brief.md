@@ -25,9 +25,10 @@ The architecture may support another folder-backed project, but no work should b
 2. Scan originals without modifying or duplicating them.
 3. Analyze sparse, sub-480p review media locally; optionally send only low-resolution proxies to rented compute later.
 4. Review a condensed queue of sustained candidate sequences with Keep, Maybe, and Skip decisions.
-5. Assemble kept sequences into 90-second, two-minute, and three-minute storyboard drafts.
-6. Reorder, replace, remove, or lock shot cards without exposing a professional timeline.
-7. Export exact source ranges and handles to DaVinci Resolve Free, plus a lightweight preview.
+5. Revisit the preserved Keeps and Maybes and save natural-language editing notes against them.
+6. Assemble kept sequences into 90-second, two-minute, and three-minute storyboard drafts.
+7. Reorder, replace, remove, or lock shot cards without exposing a professional timeline.
+8. Export exact source ranges and handles to DaVinci Resolve Free, plus a lightweight preview.
 
 ## Story Requirements
 
@@ -48,6 +49,16 @@ The architecture may support another folder-backed project, but no work should b
 - The interface explains why the candidate surfaced in plain language.
 - Keep, Maybe, and Skip decisions persist and support keyboard shortcuts.
 - Optional story-role labels include opening, transition, peak, and ending.
+- Completing screening snapshots the original outcome so later work cannot silently lose it.
+- A second pass contains only Keeps and Maybes and reuses their prepared 360p selections.
+- Plain-text editing notes autosave locally; an optional marker records the source time being viewed.
+- Notes remain requests for later analysis and editing rather than commands the current app pretends to execute.
+- The first Pyrenees assembly plan may be explicitly seeded after a documented footage-and-note review; this must not be described as automatic general-purpose interpretation.
+- Changed proposed ranges are prepared as disposable 360p previews with an up-front local runtime estimate and safe pause/resume behavior.
+- The owner reviews the two-minute plan one shot at a time and can approve, remove, replace, or restore without changing the preserved screening decision.
+- Storyboard previews distinguish the applied source range from speed, stabilization, smoothing, and crop treatments that are still planned.
+- Each storyboard shot has an autosaving additional comment stored separately from the preserved second-pass note.
+- The bird zoom and enhancement request remains visible but outside the first storyboard until its compute and quality feasibility are measured.
 
 ## Music Boundary
 

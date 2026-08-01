@@ -7,3 +7,5 @@ test:
 	python3 -m unittest discover -s tests
 	python3 -m compileall -q pyrenees_selects scripts tests
 	node --check pyrenees_selects/static/app.js
+	node --check pyrenees_selects/static/preeditor.js
+	sh -n scripts/bootstrap_selects.sh scripts/run_selects.sh

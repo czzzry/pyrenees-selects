@@ -16,6 +16,15 @@ def default_data_dir() -> Path:
     return Path.home() / ".local" / "share" / "pyrenees-selects"
 
 
+def selects_data_dir() -> Path:
+    override = os.environ.get("SELECTS_DATA_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if platform.system() == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "Selects"
+    return Path.home() / ".local" / "share" / "selects"
+
+
 def bundled_resource_dir() -> Path | None:
     """Return py2app's Resources directory when running as a frozen Mac app."""
     configured = os.environ.get("RESOURCEPATH")
@@ -48,6 +57,17 @@ class AppPaths:
             database=data_root / "pyrenees-selects.sqlite3",
             cache=data_root / "cache",
             static=static_root,
+        )
+
+    @classmethod
+    def build_selects(cls, root: Path | None = None) -> "AppPaths":
+        data_root = (root or selects_data_dir()).expanduser().resolve()
+        legacy_shape = cls.build(data_root)
+        return cls(
+            root=data_root,
+            database=data_root / "selects.sqlite3",
+            cache=data_root / "cache",
+            static=legacy_shape.static,
         )
 
     def ensure(self) -> None:

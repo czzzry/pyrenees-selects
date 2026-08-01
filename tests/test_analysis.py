@@ -1,6 +1,9 @@
+from io import BytesIO
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
-from pyrenees_selects.analysis import _frame_metrics, _window_score
+from pyrenees_selects.analysis import FRAME_BYTES, _frame_metrics, _window_score, analyze_video
 
 
 class SparseAnalysisTests(unittest.TestCase):
@@ -17,6 +20,28 @@ class SparseAnalysisTests(unittest.TestCase):
         mean, _gradient, motion = _frame_metrics(current, previous)
         self.assertEqual(mean, 100.0)
         self.assertGreater(motion, 70.0)
+
+    def test_subsecond_video_still_yields_an_analysis_sample(self) -> None:
+        class FakeProcess:
+            def __init__(self, command: list[str]) -> None:
+                video_filter = command[command.index("-vf") + 1]
+                self.stdout = BytesIO(bytes([125]) * FRAME_BYTES if "round=up" in video_filter else b"")
+                self.stderr = BytesIO()
+
+            def poll(self) -> int:
+                return 0
+
+            def wait(self) -> int:
+                return 0
+
+            def kill(self) -> None:
+                return None
+
+        with patch("pyrenees_selects.analysis.subprocess.Popen", side_effect=lambda command, **_kwargs: FakeProcess(command)):
+            result = analyze_video(Path("subsecond.mp4"), 0.665, ffmpeg="ffmpeg")
+
+        self.assertEqual(result.start_seconds, 0.0)
+        self.assertEqual(result.duration, 0.665)
 
 
 if __name__ == "__main__":

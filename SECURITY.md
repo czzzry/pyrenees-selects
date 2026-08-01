@@ -2,7 +2,18 @@
 
 ## Supported Version
 
-This is a portfolio prototype. Security fixes are applied to the latest commit on `main`; older commits and releases are not supported.
+Selects is currently a local-first alpha. Security fixes are applied to the latest minor release and the latest commit on `main`; older snapshots are not supported.
+
+## Local security boundary
+
+- The local server binds to loopback and rejects unexpected Host headers.
+- Project-changing requests require JSON and browser responses use a restrictive content-security policy.
+- The media route resolves only source IDs already stored in the project; it does not accept filesystem paths.
+- Originals are read-only inputs. Selects writes its database, cache, previews, backups, and exports under its application-data directory.
+- An OpenAI key entered in the Assistant tab is held for one request, is not logged or stored in SQLite, and is sent only to OpenAI's Responses API.
+- Imported proposals remain pending until a user accepts them.
+
+The localhost service is not designed for exposure on a LAN or the public internet. Do not run it behind a public proxy.
 
 ## Reporting A Vulnerability
 

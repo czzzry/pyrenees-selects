@@ -81,7 +81,7 @@ def analyze_video(source: Path, duration: float, cancel: Event | None = None, ff
         command.extend(["-hwaccel", "videotoolbox"])
     command.extend([
         "-i", str(source), "-an", "-sn",
-        "-vf", f"fps=1/{SAMPLE_SECONDS:g},scale={FRAME_WIDTH}:{FRAME_HEIGHT}:force_original_aspect_ratio=decrease,pad={FRAME_WIDTH}:{FRAME_HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=gray",
+        "-vf", f"fps=1/{SAMPLE_SECONDS:g}:round=up,scale={FRAME_WIDTH}:{FRAME_HEIGHT}:force_original_aspect_ratio=decrease,pad={FRAME_WIDTH}:{FRAME_HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=gray",
         "-f", "rawvideo", "-pix_fmt", "gray", "-",
     ])
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

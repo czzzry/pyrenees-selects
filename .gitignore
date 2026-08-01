@@ -21,6 +21,8 @@ music_library/
 *.db
 __pycache__/
 *.py[cod]
+*.egg-info/
+.playwright-cli/
 .pytest_cache/
 .env
 .env.*

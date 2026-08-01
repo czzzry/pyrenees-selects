@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resolve: Fix a Clip Range and Unwanted Zoom</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <h1>Keep the slot.<br>Change the moment.</h1>
+  <p class="lede">The safe editing skill for the Pyrenees film: change which source frames appear without moving the rest of the timeline, then remove accidental zoom.</p>
+
+  <img class="ui-guide" src="../assets/resolve-slip-and-zoom-callouts.png" alt="Labeled DaVinci Resolve Edit page showing the timeline, Trim Edit Mode, Inspector, Zoom controls, and Dynamic Zoom.">
+
+  <h2>Ordinary clip: slip the source range</h2>
+  <ol class="steps">
+    <li>Click the blue video clip on <strong>V1</strong>.</li>
+    <li>Press <kbd>T</kbd> for <strong>Trim Edit Mode</strong>.</li>
+    <li>Move the pointer over the middle of the clip. Drag left or right. The clip stays in the same timeline slot while the source frames inside it change.</li>
+    <li>Watch the viewer’s four-frame display: the two inner pictures are the new first and last frames.</li>
+    <li>Release, press <kbd>A</kbd> to return to normal Selection Mode, then press <kbd>Space</kbd> to review.</li>
+  </ol>
+
+  <aside class="warning">
+    <strong>The swim clip is a special case.</strong>
+    <p><code>06-swim-motion-v2.mov</code> is a prepared replacement containing only the selected eight seconds. The earlier “coming out of the water” frames are not inside that file, so slipping cannot reach them. To fix that shot, load the original <code>06_C85…</code> clip in the Source Viewer, mark the wanted section with <kbd>I</kbd> and <kbd>O</kbd>, then use a Replace Edit. Ask Codex to stand by before you perform that replacement if you want live guidance.</p>
+  </aside>
+
+  <h2>Remove unwanted zoom</h2>
+  <ol class="steps">
+    <li>Select the video clip, then click <strong>Inspector</strong> in the upper-right.</li>
+    <li>Choose the <strong>Video</strong> tab and open <strong>Transform</strong>.</li>
+    <li>Click the circular reset arrow beside Zoom, or set Zoom X and Y to <strong>1.000</strong> and Position X and Y to <strong>0.000</strong>.</li>
+    <li>Turn <strong>Dynamic Zoom</strong> off.</li>
+    <li>Review the clip. If it still looks enlarged while those values are neutral, the crop is baked into the replacement file and cannot be undone from the Inspector.</li>
+  </ol>
+
+  <p class="good">Safety net: v2 is protected. You are practicing in “Pyrenees Integrated Film · Extended Cut v3.” Press <kbd>⌘</kbd> + <kbd>Z</kbd> immediately if the entire clip moves or the neighboring edit changes.</p>
+
+  <aside class="practice">
+    <strong>Two-minute practice</strong>
+    <ol>
+      <li>Try a slip on one ordinary original clip—not the swim replacement.</li>
+      <li>Reset its Transform Zoom and confirm Dynamic Zoom is off.</li>
+      <li>Return to Codex and say which clip you tried and whether the four-frame display appeared.</li>
+    </ol>
+  </aside>
+
+  <p><small>Primary source: <a href="https://documents.blackmagicdesign.com/UserManuals/DaVinci-Resolve-20-Editors-Guide.pdf">Blackmagic Design, DaVinci Resolve 20 Editors Guide</a>, sections on Trim Edit Mode, slip edits, and Inspector transforms.</small></p>
+</main>
+</body>
+</html>

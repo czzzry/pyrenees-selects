@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Selects · Local footage pre-editor</title>
+  <link rel="stylesheet" href="/preeditor.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to editor</a>
+  <header class="topbar">
+    <a class="wordmark" href="/">Selects</a>
+    <nav class="tabs" aria-label="Project workflow" hidden>
+      <button type="button" data-view="review" aria-current="page">Review</button>
+      <button type="button" data-view="assemble">Assemble</button>
+      <button type="button" data-view="assistant">Assistant</button>
+    </nav>
+    <div class="project-switcher" hidden>
+      <label for="projectSelect">Project</label>
+      <select id="projectSelect"></select>
+      <button id="newProjectButton" class="quiet" type="button">New</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="welcome" class="welcome">
+      <div class="welcome-copy">
+        <p class="product-note">Local footage pre-editor</p>
+        <h1>Start with everything. Keep only what earns its place.</h1>
+        <p>Select a folder of original clips. Selects makes the decisions explicit: watch the full source, mark exact ranges, leave comments, and assemble a reversible first cut.</p>
+        <ol class="compact-steps">
+          <li><strong>Bring a folder.</strong> Originals stay untouched.</li>
+          <li><strong>Choose ranges.</strong> One source can yield several selections.</li>
+          <li><strong>Build a cut.</strong> Extra keeps remain available as alternates.</li>
+        </ol>
+      </div>
+      <form id="projectForm" class="setup-form">
+        <h2>New project</h2>
+        <label>Project name <input name="name" required maxlength="120" placeholder="Iceland, winter 2026"></label>
+        <label>Footage folder <span class="path-field"><input name="source_path" required placeholder="/Users/you/Movies/Iceland"><button class="quiet choose-folder" type="button" data-folder-target="source_path">Choose…</button></span></label>
+        <div class="field-pair">
+          <label>Target length <span class="optional">optional</span><input name="target_duration" type="number" min="1" step="1" placeholder="120"><small>seconds, as a guide—not a hard limit</small></label>
+          <label>Typical clip length<input name="ideal_clip_duration" type="number" min="1" step="0.5" value="8"><small>starting range only; every clip can differ</small></label>
+        </div>
+        <label>Format <select name="orientation"><option value="undecided">Decide later</option><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select></label>
+        <label>What should it feel like? <span class="optional">optional</span><textarea name="intent" rows="3" placeholder="A calm travel film that builds toward the summit"></textarea></label>
+        <button class="primary" type="submit">Create and scan folder</button>
+        <p id="projectStatus" class="status" role="status"></p>
+      </form>
+    </section>
+
+    <section id="reviewView" class="workspace" hidden>
+      <aside class="source-browser">
+        <div class="panel-heading">
+          <div><h2>Sources</h2><p id="reviewProgress">0 reviewed</p></div>
+          <div class="button-row"><button id="addFolderButton" class="quiet" type="button">Add folder</button><button id="rescanButton" class="quiet" type="button">Rescan</button></div>
+        </div>
+        <form id="addFolderForm" class="inline-folder" hidden><label>Another footage folder<span class="path-field"><input name="path" required placeholder="/Volumes/Drive/More footage"><button class="quiet choose-folder" type="button" data-folder-target="path">Choose…</button></span></label><div><button class="primary compact" type="submit">Add and scan</button><button id="cancelFolderButton" class="quiet compact" type="button">Cancel</button></div><p id="folderStatus" class="status" role="status"></p></form>
+        <div class="filters" role="group" aria-label="Filter sources">
+          <button class="is-active" data-filter="all" type="button">All</button>
+          <button data-filter="unreviewed" type="button">Unreviewed</button>
+          <button data-filter="keep" type="button">Has keeps</button>
+        </div>
+        <label class="source-search"><span class="visually-hidden">Search source filenames</span><input id="sourceSearch" type="search" placeholder="Search filenames…" autocomplete="off"></label>
+        <div id="sourceList" class="source-list"></div>
+      </aside>
+
+      <section class="screening-room">
+        <div class="source-title"><div><h1 id="sourceTitle">Choose a source</h1><p id="sourceFacts"></p></div><span id="sourceStatus" class="state-label"></span></div>
+        <form id="offlineRelinkForm" class="offline-relink" hidden><strong>This original is offline.</strong><span>Choose the same file in its new location. Your ranges and comments will stay attached.</span><span class="path-field"><input name="path" required placeholder="/Volumes/Drive/clip.mov"><button class="quiet choose-file" type="button" data-file-target="path">Choose file…</button></span><button class="primary" type="submit">Relink original</button><p id="relinkStatus" class="status" role="status"></p></form>
+        <div class="player-shell">
+          <video id="sourceVideo" controls preload="metadata"></video>
+          <div class="player-actions">
+            <button id="setInButton" type="button">Set In <kbd>I</kbd></button>
+            <button id="playRangeButton" class="play-range" type="button">Play selection <kbd>/</kbd></button>
+            <button id="setOutButton" type="button">Set Out <kbd>O</kbd></button>
+          </div>
+        </div>
+        <div class="range-editor">
+          <label>In <input id="inTime" type="number" min="0" step="0.01"></label>
+          <div><span id="rangeDuration">0.00 s selected</span><input id="rangeScrubber" type="range" min="0" max="1" step="0.01" value="0" aria-label="Source playhead"></div>
+          <label>Out <input id="outTime" type="number" min="0" step="0.01"></label>
+        </div>
+        <p class="keyboard-help"><kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> one second · the full original is always available here</p>
+      </section>
+
+      <aside class="decision-panel">
+        <div class="panel-heading"><div><h2>Selection</h2><p>Save an exact range from this source.</p></div></div>
+        <fieldset class="segmented"><legend>Decision</legend><label><input type="radio" name="decision" value="keep" checked><span>Keep</span></label><label><input type="radio" name="decision" value="maybe"><span>Maybe</span></label><label><input type="radio" name="decision" value="skip"><span>Skip</span></label></fieldset>
+        <label class="stacked">Comment<textarea id="selectionComment" rows="5" placeholder="Use the moment after I turn; preserve what I say at the end."></textarea></label>
+        <div class="field-pair">
+          <label class="stacked">Story role<select id="storyRole"><option value="">Unspecified</option><option value="opening">Opening</option><option value="transition">Transition</option><option value="peak">Peak</option><option value="ending">Ending</option></select></label>
+          <label class="stacked">Source audio<select id="audioIntent"><option value="undecided">Decide later</option><option value="preserve">Preserve</option><option value="speech">Important speech</option><option value="background">Background only</option><option value="mute">Mute</option></select></label>
+        </div>
+        <button id="saveSelectionButton" class="primary" type="button">Save as a new selection</button>
+        <button id="newSelectionButton" class="quiet new-selection" type="button" hidden>Start another range</button>
+        <button id="archiveSelectionButton" class="danger new-selection" type="button" hidden>Archive this selection</button>
+        <p id="selectionStatus" class="status" role="status"></p>
+        <div class="saved-heading"><h3>Ranges from this source</h3><span id="sourceSelectionCount">0</span></div>
+        <div id="sourceSelections" class="saved-selections"></div>
+      </aside>
+    </section>
+
+    <section id="assembleView" class="assemble" hidden>
+      <header class="view-heading"><div><p class="product-note">First cut</p><h1>Put the story in order.</h1><p>Target length guides the cut. It never deletes good material; unused selections stay in the left column as alternates.</p></div><div class="duration-readout"><strong id="sequenceDuration">0:00</strong><span id="targetDuration">No target set</span></div></header>
+      <details class="project-settings"><summary>Project settings and backup</summary><form id="projectSettingsForm"><label>Name<input name="name" required maxlength="120"></label><label>Target seconds<input name="target_duration" type="number" min="1"></label><label>Typical clip seconds<input name="ideal_clip_duration" type="number" min="1" step="0.5"></label><label>Format<select name="orientation"><option value="undecided">Decide later</option><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select></label><label class="wide">Creative direction<textarea name="intent" rows="2"></textarea></label><div class="wide button-row"><button class="primary" type="submit">Save settings</button><button id="backupButton" class="quiet" type="button">Back up project database</button></div><p id="settingsStatus" class="wide status" role="status"></p></form></details>
+      <div class="assembly-grid">
+        <section class="alternates"><div class="panel-heading"><div><h2>Available selections</h2><p>Keep and maybe ranges not currently in the cut.</p></div></div><div id="alternateList"></div></section>
+        <section class="sequence-panel"><div class="panel-heading"><div><h2 id="sequenceHeading">New sequence</h2><p>Use the arrows to revise without overwriting the earlier version.</p><label class="sequence-picker">Saved cut<select id="sequenceSelect"><option value="">New sequence</option></select></label></div><button id="saveSequenceButton" class="primary compact" type="button">Save first cut</button></div><ol id="sequenceList" class="sequence-list"></ol><div class="preview-panel"><video id="sequencePreview" controls hidden></video><button id="previewSequenceButton" type="button">Render low-resolution preview</button><button id="exportSequenceButton" class="quiet" type="button">Export to DaVinci Resolve</button><p id="sequenceStatus" class="status" role="status"></p></div></section>
+      </div>
+    </section>
+
+    <section id="assistantView" class="assistant" hidden>
+      <header class="view-heading"><div><p class="product-note">Optional assistance</p><h1>The assistant proposes. You approve.</h1><p>Selects works without an LLM. Codex, Claude, or another agent can read a bounded project summary and propose selection changes or a sequence. It cannot alter the project until you accept the proposal here.</p></div></header>
+      <div class="assistant-grid">
+        <section class="agent-instructions"><h2>Use your existing agent</h2><p>Ask it to inspect this project with the command below. Media files and local folder paths are not included in the context.</p><pre id="agentCommand"></pre><div class="button-row"><button id="copyAgentCommand" type="button">Copy command</button><button id="copyContextButton" class="quiet" type="button">Copy project context</button></div><h3>Proposal contract</h3><pre>{
+  "kind": "sequence",
+  "payload": { "selection_ids": ["selection_…"] },
+  "explanation": "Why this order serves the stated intent"
+}</pre></section>
+        <section class="proposal-import"><h2>Import a proposal</h2><label class="stacked">Provider<input id="proposalProvider" value="codex"></label><label class="stacked">Proposal JSON<textarea id="proposalJson" rows="12" placeholder='{"kind":"sequence","payload":{"selection_ids":[]},"explanation":"..."}'></textarea></label><button id="importProposalButton" class="primary" type="button">Save for review</button><p id="proposalStatus" class="status" role="status"></p><div class="saved-heading"><h3>Proposal history</h3><span id="proposalCount">0</span></div><div id="proposalList" class="proposal-list"></div></section>
+      </div>
+      <section class="built-in-assistant">
+        <div><h2>Or connect an OpenAI API key for this request</h2><p>The key is sent from this local page to the local Selects server and then to OpenAI. It is never written to the Selects database. Only the path-free project summary is sent—never your videos or folder paths.</p></div>
+        <div class="built-in-fields"><label class="stacked">API key<input id="openaiKey" type="password" autocomplete="off" placeholder="sk-…"></label><label class="stacked">Model<input id="openaiModel" value="gpt-5-mini"></label><label class="stacked full">Direction <span class="optional">optional</span><textarea id="assistantDirection" rows="3" placeholder="Prioritize a gentle opening and keep every moment with speech."></textarea></label><button id="askAssistantButton" class="primary" type="button">Propose a first cut</button><p id="assistantStatus" class="status" role="status"></p></div>
+      </section>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/preeditor.js" defer></script>
+</body>
+</html>
