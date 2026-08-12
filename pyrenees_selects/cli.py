@@ -74,10 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
     project_commands.add_parser("list")
     create = project_commands.add_parser("create")
     create.add_argument("--name", required=True)
-    create.add_argument("--target-duration", type=float)
-    create.add_argument("--orientation", choices=("landscape", "portrait", "undecided"), default="undecided")
+    create.add_argument("--target-duration", "--target-duration-seconds", dest="target_duration", type=float, default=120)
+    create.add_argument("--orientation", choices=("landscape", "portrait", "undecided"), default="landscape")
     create.add_argument("--intent", default="")
     create.add_argument("--ideal-clip-duration", type=float, default=8.0)
+    create.add_argument("--shot-rhythm", choices=("energetic", "balanced", "observational", "custom"))
+    create.add_argument("--shot-min-seconds", type=float, default=6.0)
+    create.add_argument("--shot-max-seconds", type=float, default=9.0)
+    create.add_argument("--candidate-breadth", choices=("focused", "generous", "broad"), default="generous")
+    create.add_argument("--audio-preference", choices=("speech_and_distinctive", "visual", "all"), default="speech_and_distinctive")
     show = project_commands.add_parser("show")
     show.add_argument("project_id")
     manifest = project_commands.add_parser("manifest")
@@ -94,6 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
     update_project.add_argument("--orientation", choices=("landscape", "portrait", "undecided"))
     update_project.add_argument("--intent")
     update_project.add_argument("--ideal-clip-duration", type=float)
+    update_project.add_argument("--shot-rhythm", choices=("energetic", "balanced", "observational", "custom"))
+    update_project.add_argument("--shot-min-seconds", type=float)
+    update_project.add_argument("--shot-max-seconds", type=float)
+    update_project.add_argument("--candidate-breadth", choices=("focused", "generous", "broad"))
+    update_project.add_argument("--audio-preference", choices=("speech_and_distinctive", "visual", "all"))
     backup = project_commands.add_parser("backup")
     backup.add_argument("--output", type=Path)
 
@@ -222,7 +232,18 @@ def run(argv: Sequence[str] | None = None) -> int:
                 payload = editor.projects()
             elif args.project_command == "create":
                 payload = editor.create_project(
-                    ProjectOptions(args.name, args.target_duration, args.orientation, args.intent, args.ideal_clip_duration)
+                    ProjectOptions(
+                        name=args.name, target_duration=args.target_duration, orientation=args.orientation,
+                        intent=args.intent, ideal_clip_duration=args.ideal_clip_duration,
+                        shot_rhythm=args.shot_rhythm or min(
+                            (("energetic", 4.0), ("balanced", 7.5), ("observational", 13.0)),
+                            key=lambda item: abs(item[1] - args.ideal_clip_duration),
+                        )[0],
+                        shot_min_seconds=(3.0 if args.shot_rhythm is None and args.ideal_clip_duration < 5.75 else 10.0 if args.shot_rhythm is None and args.ideal_clip_duration > 10.25 else args.shot_min_seconds),
+                        shot_max_seconds=(5.0 if args.shot_rhythm is None and args.ideal_clip_duration < 5.75 else 16.0 if args.shot_rhythm is None and args.ideal_clip_duration > 10.25 else args.shot_max_seconds),
+                        candidate_breadth=args.candidate_breadth,
+                        audio_preference=args.audio_preference,
+                    )
                 )
             elif args.project_command == "show":
                 payload = editor.project(args.project_id)
@@ -243,6 +264,9 @@ def run(argv: Sequence[str] | None = None) -> int:
                 values = {
                     "name": args.name, "orientation": args.orientation, "intent": args.intent,
                     "ideal_clip_duration": args.ideal_clip_duration,
+                    "shot_rhythm": args.shot_rhythm, "shot_min_seconds": args.shot_min_seconds,
+                    "shot_max_seconds": args.shot_max_seconds, "candidate_breadth": args.candidate_breadth,
+                    "audio_preference": args.audio_preference,
                     "target_duration": None if args.clear_target_duration else args.target_duration,
                 }
                 changes = {key: value for key, value in values.items() if value is not None}
@@ -328,9 +352,15 @@ def run(argv: Sequence[str] | None = None) -> int:
                 project = editor.project(version["project_id"])
                 if not project:
                     raise KeyError(version["project_id"])
-                orientation = project.get("orientation") if project.get("orientation") != "undecided" else "landscape"
+                for item in version.get("items") or []:
+                    source = editor.assert_source_unchanged(
+                        str(item["source_id"]), str(item.get("source_fingerprint") or "") or None
+                    )
+                    item["current_path"] = source["current_path"]
+                    item["source_status"] = source["status"]
                 payload = write_handoff(
-                    version, args.output.expanduser().resolve(), project_name=project["name"], orientation=orientation
+                    version, args.output.expanduser().resolve(), project_name=project["name"],
+                    orientation=version.get("orientation") or "landscape"
                 )
         elif args.command == "proposal":
             if args.proposal_command == "list":

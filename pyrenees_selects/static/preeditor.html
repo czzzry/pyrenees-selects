@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Selects · Local footage pre-editor</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/preeditor.css">
 </head>
 <body>
@@ -11,13 +12,15 @@
   <header class="topbar">
     <a class="wordmark" href="/">Selects</a>
     <nav class="tabs" aria-label="Project workflow" hidden>
-      <button type="button" data-view="review" aria-current="page">Review</button>
+      <button type="button" data-view="prepare" aria-current="page">Prepare</button>
+      <button type="button" data-view="candidates">Review</button>
       <button type="button" data-view="assemble">Assemble</button>
       <button type="button" data-view="assistant">Assistant</button>
+      <button type="button" data-view="sources">Sources</button>
     </nav>
     <div class="project-switcher" hidden>
       <label for="projectSelect">Project</label>
-      <select id="projectSelect"></select>
+      <select id="projectSelect" aria-label="Project"></select>
       <button id="newProjectButton" class="quiet" type="button">New</button>
     </div>
   </header>
@@ -26,12 +29,12 @@
     <section id="welcome" class="welcome">
       <div class="welcome-copy">
         <p class="product-note">Local footage pre-editor</p>
-        <h1>Start with everything. Keep only what earns its place.</h1>
-        <p>Select a folder of original clips. Selects makes the decisions explicit: watch the full source, mark exact ranges, leave comments, and assemble a reversible first cut.</p>
+        <h1>Turn a footage folder into moments worth reviewing.</h1>
+        <p>Set the shape of the film, let this Mac prepare lightweight proposals overnight, then make every editorial decision yourself.</p>
         <ol class="compact-steps">
-          <li><strong>Bring a folder.</strong> Originals stay untouched.</li>
-          <li><strong>Choose ranges.</strong> One source can yield several selections.</li>
-          <li><strong>Build a cut.</strong> Extra keeps remain available as alternates.</li>
+          <li><strong>Point to footage.</strong> Nested folders are included; originals stay untouched.</li>
+          <li><strong>Set planning targets.</strong> Film length and shot rhythm guide the search.</li>
+          <li><strong>Review proposals.</strong> Play samples, open the full clip, comment, and decide.</li>
         </ol>
       </div>
       <form id="projectForm" class="setup-form">
@@ -39,17 +42,54 @@
         <label>Project name <input name="name" required maxlength="120" placeholder="Iceland, winter 2026"></label>
         <label>Footage folder <span class="path-field"><input name="source_path" required placeholder="/Users/you/Movies/Iceland"><button class="quiet choose-folder" type="button" data-folder-target="source_path">Choose…</button></span></label>
         <div class="field-pair">
-          <label>Target length <span class="optional">optional</span><input name="target_duration" type="number" min="1" step="1" placeholder="120"><small>seconds, as a guide—not a hard limit</small></label>
-          <label>Typical clip length<input name="ideal_clip_duration" type="number" min="1" step="0.5" value="8"><small>starting range only; every clip can differ</small></label>
+          <label>Target film length<input name="target_duration_seconds" type="number" min="10" max="10800" step="1" value="120" required><small>seconds · a planning target, never an automatic deletion rule</small></label>
+          <label>Rough shot rhythm<select name="shot_rhythm"><option value="energetic">Energetic · 3–5 sec</option><option value="balanced" selected>Balanced · 6–9 sec</option><option value="observational">Observational · 10–16 sec</option><option value="custom">Custom</option></select><small>every proposed range remains adjustable</small></label>
         </div>
-        <label>Format <select name="orientation"><option value="undecided">Decide later</option><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select></label>
+        <div id="customRhythm" class="field-pair" hidden><label>Minimum shot seconds<input name="shot_min_seconds" type="number" min="1" max="60" value="6"></label><label>Maximum shot seconds<input name="shot_max_seconds" type="number" min="1" max="60" value="9"></label></div>
+        <label>Final format <select name="orientation"><option value="landscape" selected>Landscape</option><option value="portrait">Portrait</option><option value="undecided">Decide later</option></select></label>
         <label>What should it feel like? <span class="optional">optional</span><textarea name="intent" rows="3" placeholder="A calm travel film that builds toward the summit"></textarea></label>
-        <button class="primary" type="submit">Create and scan folder</button>
+        <details class="advanced-options"><summary>Advanced planning</summary><label>How many options?<select name="candidate_breadth"><option value="focused">Focused · about 1.25× target</option><option value="generous" selected>Generous · about 2× target</option><option value="broad">Broad · about 3× target</option></select></label><label>Audio signal<select name="audio_preference"><option value="speech_and_distinctive" selected>Favor measured audio activity</option><option value="visual">Visual signals only</option><option value="all">Light audio weighting</option></select><small>This detects activity, not speech or meaning.</small></label></details>
+        <button class="primary" type="submit">Inspect folder and show my plan</button>
+        <button id="sampleProjectButton" class="quiet sample-project-button" type="button">Explore a small sample project</button>
+        <p class="local-promise"><strong>Private by default.</strong> No account, telemetry, or footage upload.</p>
         <p id="projectStatus" class="status" role="status"></p>
       </form>
     </section>
 
+    <section id="planView" class="product-stage" hidden>
+      <header class="stage-heading"><div><p class="step-label">01 · Overnight plan</p><h1>A clear plan before the long work.</h1><p>Selects has inspected the folder. Check the scope, disk calculation, and exact proposal range before starting.</p></div><button id="editBriefButton" class="quiet" type="button">Edit project brief</button></header>
+      <section id="planEmptyState" class="empty-state" hidden><p class="eyebrow">Nothing readable yet</p><h2>This folder has no video Selects can prepare.</h2><p>Choose another folder or fix the files marked unreadable. Supported inputs include MP4, MOV, M4V, AVI, MKV, MTS, M2TS, 3GP, and WebM.</p><div class="button-row"><button id="emptyChooseFolder" class="primary" type="button">Choose another folder</button><button id="emptyReviewSources" class="quiet" type="button">See files that need attention</button></div></section>
+      <div class="metric-strip"><div><span>Readable footage</span><strong id="planFootage">—</strong></div><div><span>Proposed material</span><strong id="planCandidateTime">—</strong></div><div><span>Expected proposals</span><strong id="planCandidateCount">—</strong></div><div><span>Run estimate</span><strong id="planRuntime">Estimating…</strong></div></div>
+      <div class="plan-grid">
+        <section class="plan-card"><p class="eyebrow">What runs locally</p><h2>Three lightweight stages</h2><ol class="process-list"><li><span>1</span><div><strong>Review copies</strong><p>Seekable low-resolution copies make large phone and drone footage easier to scrub.</p></div></li><li><span>2</span><div><strong>Sparse measurement</strong><p>Samples exposure, detail, sustained movement, consistency, and optional audio activity.</p></div></li><li><span>3</span><div><strong>Playable proposals</strong><p>Renders the exact ranges for fast human review. Nothing becomes an edit without you.</p></div></li></ol></section>
+        <aside class="plan-card plan-summary"><p class="eyebrow">Preflight</p><dl><div><dt>Ready sources</dt><dd id="planReady">—</dd></div><div><dt>Duplicates ignored</dt><dd id="planDuplicates">—</dd></div><div><dt>Portrait</dt><dd id="planPortrait">—</dd></div><div><dt>No source audio</dt><dd id="planSilent">—</dd></div><div><dt>Variable frame rate</dt><dd id="planVfr">—</dd></div><div><dt>Very short</dt><dd id="planShort">—</dd></div><div><dt>Broken / offline</dt><dd id="planAttention">—</dd></div><div><dt>Unsupported files</dt><dd id="planUnsupported">—</dd></div><div><dt>Estimated artifacts</dt><dd id="planArtifacts">—</dd></div><div><dt>Safety reserve</dt><dd id="planReserve">—</dd></div><div><dt>Free here</dt><dd id="planAvailable">—</dd></div></dl><div id="planDiskWarning" class="callout warning" hidden><strong>More disk space is needed.</strong><p id="planDiskDetail"></p><label>Use another cache folder<span class="path-field"><input id="cachePath" placeholder="/Volumes/Fast Drive/Selects Cache"><button id="chooseCacheButton" class="quiet choose-folder-standalone" type="button">Choose…</button></span></label></div><label class="check-row"><input id="preventSleep" type="checkbox" checked><span><strong>Keep this Mac awake</strong><small>Released on pause, cancel, completion, or error.</small></span></label><button id="startOvernightButton" class="primary wide-action" type="button">Start overnight preparation</button><button id="manualReviewButton" class="quiet wide-action" type="button">Review full sources without analysis</button><p id="planStatus" class="status" role="status"></p></aside>
+      </div>
+    </section>
+
+    <section id="runView" class="product-stage" hidden aria-labelledby="runTitle">
+      <header class="stage-heading"><div><p class="step-label">01 · Overnight preparation</p><h1 id="runTitle">Finding moments worth your time.</h1><p id="runSubtitle">The work is checkpointed after every source. Completed proposals can be reviewed immediately.</p></div><span id="runState" class="run-state">Running</span></header>
+      <div class="run-layout"><section class="run-progress-card"><div class="run-progress-head"><div><span id="runStageLabel">Starting</span><strong id="runFilename">Preparing the queue…</strong></div><strong id="runPercent">0%</strong></div><progress id="runProgress" max="1" value="0"></progress><div class="run-facts"><span id="runCompleted">0 of 0 tasks</span><span id="runElapsed">Elapsed 0:00</span><span id="runEta">Estimating…</span></div><div class="button-row run-actions"><button id="pauseRunButton" class="quiet" type="button">Pause safely</button><button id="resumeRunButton" class="primary" type="button" hidden>Resume preparation</button><button id="cancelRunButton" class="danger" type="button">Cancel run</button><button id="reviewReadyButton" class="primary" type="button">Review ready proposals</button></div><div id="runCacheRecovery" class="callout warning" hidden><strong>Move completed work to another cache.</strong><p>Published samples stay intact; preparation resumes from the next safe checkpoint.</p><label>New cache folder<span class="path-field"><input id="runCachePath" placeholder="/Volumes/Fast Drive/Selects Cache"><button id="moveRunCacheButton" class="quiet" type="button">Move…</button></span></label></div><p id="runStatus" class="status" role="status"></p></section><aside class="run-checkpoints"><p class="eyebrow">Trust guarantees</p><ul><li>Original files are read-only</li><li>Progress is saved in the project database</li><li>Partial files are never marked complete</li><li id="sleepGuarantee">This Mac will remain awake during the run</li></ul><div id="runFailures" class="failure-list"></div></aside></div>
+    </section>
+
+    <section id="candidateView" class="candidate-workspace" hidden>
+      <aside class="candidate-browser"><header><p class="step-label">02 · Human review</p><h1>Proposed moments</h1><p id="candidateSummary">Suggestions, not decisions.</p></header><div class="candidate-filters" role="group" aria-label="Filter proposals"><button class="is-active" data-candidate-filter="all" type="button">All</button><button data-candidate-filter="unreviewed" type="button">Unreviewed</button><button data-candidate-filter="kept" type="button">Keep</button><button data-candidate-filter="maybe" type="button">Maybe</button></div><div id="candidateList" class="candidate-list"></div></aside>
+      <section class="candidate-player"><header><div><h2 id="candidateTitle">Choose a proposed moment</h2><p id="candidateFacts"></p></div><button id="candidateMediaMode" class="quiet" type="button">Open full source</button></header><video id="candidateVideo" controls preload="metadata"></video><div class="candidate-range"><label>In <input id="candidateIn" type="number" min="0" step="0.001"></label><div><span id="candidateRangeLabel">—</span><input id="candidateScrubber" type="range" min="0" max="1" step="0.001" value="0" aria-label="Full source playhead"></div><label>Out <input id="candidateOut" type="number" min="0" step="0.001"></label></div><p class="keyboard-help">The sample and full source use the same source time. Adjusting In/Out never changes the original.</p></section>
+      <aside class="candidate-decision"><p class="eyebrow">Your editorial decision</p><fieldset class="segmented"><legend>Decision</legend><label><input type="radio" name="candidateDecision" value="keep"><span>Keep</span></label><label><input type="radio" name="candidateDecision" value="maybe"><span>Maybe</span></label><label><input type="radio" name="candidateDecision" value="skip"><span>Skip</span></label></fieldset><label class="stacked">Comment<textarea id="candidateComment" rows="6" placeholder="Hold longer after the turn; keep the source audio."></textarea></label><div class="field-pair"><label class="stacked">Story role<select id="candidateRole"><option value="">Unspecified</option><option value="opening">Opening</option><option value="transition">Transition</option><option value="peak">Peak</option><option value="ending">Ending</option></select></label><label class="stacked">Source audio<select id="candidateAudio"><option value="undecided">Decide later</option><option value="preserve">Preserve</option><option value="speech">Important speech</option><option value="background">Background only</option><option value="mute">Mute</option></select></label></div><button id="saveCandidateButton" class="primary wide-action" type="button">Save decision</button><p id="candidateStatus" class="status" role="status"></p><div class="measured-rationale"><p class="eyebrow">Why it surfaced</p><p id="candidateRationale">Measured signals will appear here.</p></div></aside>
+    </section>
+
+    <section id="readinessView" class="readiness" hidden>
+      <header class="readiness-heading">
+        <div><p class="product-note">Project readiness</p><h1 id="readinessTitle">Your footage is ready to screen.</h1></div>
+        <p>Nothing has been copied, transcoded, or changed yet. Choose the review path that fits this computer.</p>
+      </header>
+      <div class="readiness-grid">
+        <section><div class="readiness-section-heading"><h2>Footage inventory</h2><span id="readinessSize"></span></div><dl class="inventory-list"><div><dt>Ready to review</dt><dd id="readinessReady">0 clips</dd></div><div><dt>Portrait footage</dt><dd id="readinessPortrait">0 clips</dd></div><div><dt>Silent footage</dt><dd id="readinessSilent">0 clips</dd></div><div><dt>Needs attention</dt><dd id="readinessAttention">0 clips</dd></div></dl></section>
+        <section class="review-choice"><h2>How lightly should Selects prepare?</h2><p>Smaller local review copies preserve source timing and audio while making HEVC and 4K footage easier to scrub. You can switch to the full original at any time.</p><div class="estimate-row"><span>Estimated extra space</span><strong id="proxyEstimate">—</strong></div><button id="prepareProxiesButton" class="primary" type="button">Prepare in background and start reviewing</button><button id="reviewOriginalsButton" class="quiet" type="button">Use originals without preparing</button><p id="readinessStatus" class="status" role="status"></p></section>
+      </div>
+    </section>
+
     <section id="reviewView" class="workspace" hidden>
+      <div id="proxyBanner" class="proxy-banner" hidden><div><strong id="proxyBannerTitle">Preparing smoother review copies</strong><span id="proxyBannerDetail"></span></div><progress id="proxyProgress" max="1" value="0"></progress></div>
       <aside class="source-browser">
         <div class="panel-heading">
           <div><h2>Sources</h2><p id="reviewProgress">0 reviewed</p></div>
@@ -66,7 +106,7 @@
       </aside>
 
       <section class="screening-room">
-        <div class="source-title"><div><h1 id="sourceTitle">Choose a source</h1><p id="sourceFacts"></p></div><span id="sourceStatus" class="state-label"></span></div>
+        <div class="source-title"><div><h1 id="sourceTitle">Choose a source</h1><p id="sourceFacts"></p></div><div class="source-title-actions"><button id="sourceMediaModeButton" class="quiet compact" type="button" hidden>View full original</button><span id="sourceStatus" class="state-label"></span></div></div>
         <form id="offlineRelinkForm" class="offline-relink" hidden><strong>This original is offline.</strong><span>Choose the same file in its new location. Your ranges and comments will stay attached.</span><span class="path-field"><input name="path" required placeholder="/Volumes/Drive/clip.mov"><button class="quiet choose-file" type="button" data-file-target="path">Choose file…</button></span><button class="primary" type="submit">Relink original</button><p id="relinkStatus" class="status" role="status"></p></form>
         <div class="player-shell">
           <video id="sourceVideo" controls preload="metadata"></video>
@@ -86,6 +126,7 @@
 
       <aside class="decision-panel">
         <div class="panel-heading"><div><h2>Selection</h2><p>Save an exact range from this source.</p></div></div>
+        <section id="firstSelectionCoach" class="first-selection-coach" hidden><span>Your first selection · about 30 seconds</span><h3>Keep the moment, not the whole file.</h3><ol><li>Play or scrub to the start and press <kbd>I</kbd>.</li><li>Move to the end and press <kbd>O</kbd>.</li><li>Choose a decision and explain why.</li></ol></section>
         <fieldset class="segmented"><legend>Decision</legend><label><input type="radio" name="decision" value="keep" checked><span>Keep</span></label><label><input type="radio" name="decision" value="maybe"><span>Maybe</span></label><label><input type="radio" name="decision" value="skip"><span>Skip</span></label></fieldset>
         <label class="stacked">Comment<textarea id="selectionComment" rows="5" placeholder="Use the moment after I turn; preserve what I say at the end."></textarea></label>
         <div class="field-pair">
@@ -103,10 +144,10 @@
 
     <section id="assembleView" class="assemble" hidden>
       <header class="view-heading"><div><p class="product-note">First cut</p><h1>Put the story in order.</h1><p>Target length guides the cut. It never deletes good material; unused selections stay in the left column as alternates.</p></div><div class="duration-readout"><strong id="sequenceDuration">0:00</strong><span id="targetDuration">No target set</span></div></header>
-      <details class="project-settings"><summary>Project settings and backup</summary><form id="projectSettingsForm"><label>Name<input name="name" required maxlength="120"></label><label>Target seconds<input name="target_duration" type="number" min="1"></label><label>Typical clip seconds<input name="ideal_clip_duration" type="number" min="1" step="0.5"></label><label>Format<select name="orientation"><option value="undecided">Decide later</option><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select></label><label class="wide">Creative direction<textarea name="intent" rows="2"></textarea></label><div class="wide button-row"><button class="primary" type="submit">Save settings</button><button id="backupButton" class="quiet" type="button">Back up project database</button></div><p id="settingsStatus" class="wide status" role="status"></p></form></details>
+      <details class="project-settings"><summary>Project brief and backup</summary><form id="projectSettingsForm"><label>Name<input name="name" required maxlength="120"></label><label>Target seconds<input name="target_duration_seconds" type="number" min="10" max="10800" required></label><label>Shot rhythm<select name="shot_rhythm"><option value="energetic">Energetic · 3–5 sec</option><option value="balanced">Balanced · 6–9 sec</option><option value="observational">Observational · 10–16 sec</option><option value="custom">Custom</option></select></label><label>Format<select name="orientation"><option value="undecided">Decide later</option><option value="landscape">Landscape</option><option value="portrait">Portrait</option></select></label><label>Minimum shot seconds<input name="shot_min_seconds" type="number" min="1" max="60"></label><label>Maximum shot seconds<input name="shot_max_seconds" type="number" min="1" max="60"></label><label>Candidate breadth<select name="candidate_breadth"><option value="focused">Focused · 1.25×</option><option value="generous">Generous · 2×</option><option value="broad">Broad · 3×</option></select></label><label>Audio weighting<select name="audio_preference"><option value="speech_and_distinctive">Favor activity</option><option value="visual">Visual only</option><option value="all">Light weighting</option></select></label><label class="wide">Creative direction<textarea name="intent" rows="2"></textarea></label><div class="wide button-row"><button class="primary" type="submit">Save brief and recalculate plan</button><button id="backupButton" class="quiet" type="button">Back up project database</button></div><p id="settingsStatus" class="wide status" role="status"></p></form></details>
       <div class="assembly-grid">
         <section class="alternates"><div class="panel-heading"><div><h2>Available selections</h2><p>Keep and maybe ranges not currently in the cut.</p></div></div><div id="alternateList"></div></section>
-        <section class="sequence-panel"><div class="panel-heading"><div><h2 id="sequenceHeading">New sequence</h2><p>Use the arrows to revise without overwriting the earlier version.</p><label class="sequence-picker">Saved cut<select id="sequenceSelect"><option value="">New sequence</option></select></label></div><button id="saveSequenceButton" class="primary compact" type="button">Save first cut</button></div><ol id="sequenceList" class="sequence-list"></ol><div class="preview-panel"><video id="sequencePreview" controls hidden></video><button id="previewSequenceButton" type="button">Render low-resolution preview</button><button id="exportSequenceButton" class="quiet" type="button">Export to DaVinci Resolve</button><p id="sequenceStatus" class="status" role="status"></p></div></section>
+        <section class="sequence-panel"><div class="panel-heading"><div><h2 id="sequenceHeading">New sequence</h2><p>Use the arrows to revise without overwriting the earlier version.</p><label class="sequence-picker">Saved cut<select id="sequenceSelect"><option value="">New sequence</option></select></label></div><button id="saveSequenceButton" class="primary compact" type="button">Save first cut</button></div><ol id="sequenceList" class="sequence-list"></ol><div class="preview-panel"><video id="sequencePreview" controls hidden></video><button id="previewSequenceButton" type="button">Render low-resolution preview</button><button id="exportSequenceButton" class="quiet" type="button">Export to DaVinci Resolve</button><p id="sequenceStatus" class="status" role="status"></p><div id="exportNextSteps" class="export-next-steps" hidden><strong>Handoff ready</strong><ol><li>Open DaVinci Resolve and create or open a project.</li><li>Choose <b>File → Import → Timeline</b>, then select the FCPXML below.</li><li>Resolve relinks the timeline to your untouched originals.</li></ol><code id="exportPath"></code></div></div></section>
       </div>
     </section>
 

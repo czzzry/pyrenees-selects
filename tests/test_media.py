@@ -9,6 +9,7 @@ from pyrenees_selects.media import (
     cache_key,
     candidate_range,
     render_review_clip,
+    render_source_proxy,
     top_level_videos,
     treatment_filter_chain,
 )
@@ -74,6 +75,26 @@ class MediaTests(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertIn("videotoolbox", command)
             self.assertEqual(destination.read_bytes(), b"preview")
+
+    def test_full_source_proxy_preserves_audio_and_timing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mp4"
+            destination = root / "review.mp4"
+            source.write_bytes(b"source")
+
+            def fake_run(command: list[str], **_kwargs: object) -> None:
+                Path(command[-1]).write_bytes(b"proxy")
+
+            with patch("pyrenees_selects.media._run_cancellable", side_effect=fake_run) as run:
+                render_source_proxy(source, destination, ffmpeg="ffmpeg")
+
+            command = run.call_args.args[0]
+            self.assertIn("0:a:0?", command)
+            self.assertIn("+faststart", command)
+            self.assertNotIn("-ss", command)
+            self.assertNotIn("-t", command)
+            self.assertEqual(destination.read_bytes(), b"proxy")
 
     def test_treatment_filter_chain_applies_stabilization_speed_and_interpolation(self) -> None:
         filter_chain = treatment_filter_chain(

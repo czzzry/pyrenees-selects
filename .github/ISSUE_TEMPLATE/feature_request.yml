@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a problem for the local pre-editor to solve.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the editing situation before proposing an interface or implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Current workaround
+      description: Explain how you handle this in Selects, Resolve, or another tool today.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: A successful outcome
+      description: What should become easier without turning Selects into a second professional timeline?
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Product boundary
+      options:
+        - label: This can preserve originals, exact source identity, and reversible decisions.
+          required: true

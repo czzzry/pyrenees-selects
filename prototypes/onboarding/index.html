@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- Three sequential screens in the proposed first-run flow, switchable via ?variant=A, B, or C. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Selects product flow</title>
+  <link rel="icon" href="../../pyrenees_selects/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="prototype"></main>
+  <nav class="variant-switcher" aria-label="Product flow screens">
+    <button id="previousVariant" type="button" aria-label="Previous screen">←</button>
+    <div>
+      <strong id="variantLabel">1 · Project brief</strong>
+      <span>Use ← → to inspect the flow</span>
+    </div>
+    <button id="nextVariant" type="button" aria-label="Next screen">→</button>
+  </nav>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -2,13 +2,16 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
+OUTPUT_ROOT="${SELECTS_BUILD_OUTPUT_ROOT:-$ROOT}"
+VERSION=$(python3 -c 'import pathlib, sys, tomllib; print(tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["project"]["version"])' "$ROOT/pyproject.toml")
 VENV="$ROOT/.venv-selects-macos"
 TOOL_CACHE="$ROOT/.cache/macos-tools"
-TOOL_DIR="$ROOT/build/selects-media-tools"
-BUILD_DIR="$ROOT/build/selects-py2app"
-DIST_DIR="$ROOT/dist/selects"
+TOOL_DIR="$OUTPUT_ROOT/build/selects-media-tools"
+BUILD_DIR="$OUTPUT_ROOT/build/selects-py2app"
+DIST_DIR="$OUTPUT_ROOT/dist/selects"
 APP="$DIST_DIR/Selects.app"
-ARCHIVE="$ROOT/dist/Selects-0.7.0-macos-x86_64.zip"
+ARCHIVE="$OUTPUT_ROOT/dist/Selects-$VERSION-macos-x86_64.zip"
+ICON="$OUTPUT_ROOT/build/Selects.icns"
 FFMPEG_ZIP="$TOOL_CACHE/ffmpeg-8.1.2.zip"
 FFPROBE_ZIP="$TOOL_CACHE/ffprobe-8.1.2.zip"
 FFMPEG_SHA="e91df72a1ee7c26606f90dd2dd4dcccc6a75140ff9ea6fdd50faae828b82ba69"
@@ -19,6 +22,8 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   print -u2 "Selects.app must be built on macOS."
   exit 1
 fi
+
+"$ROOT/scripts/generate_selects_icon.sh" "$ICON"
 
 python3 -m venv "$VENV"
 "$VENV/bin/python" -m pip install --disable-pip-version-check -q -r "$ROOT/requirements-macos.txt"
@@ -43,7 +48,10 @@ for raw in sys.argv[1:]:
 PY
 
 cd "$ROOT"
-"$VENV/bin/python" setup_selects_macos.py py2app --bdist-base "$BUILD_DIR" --dist-dir "$DIST_DIR"
+SELECTS_BUILD_ICON="$ICON" \
+SELECTS_BUILD_FFMPEG="$TOOL_DIR/ffmpeg" \
+SELECTS_BUILD_FFPROBE="$TOOL_DIR/ffprobe" \
+  "$VENV/bin/python" setup_selects_macos.py py2app --bdist-base "$BUILD_DIR" --dist-dir "$DIST_DIR"
 
 if [[ "$SIGN_IDENTITY" == "-" ]]; then
   codesign --force --sign - "$APP/Contents/Resources/bin/ffmpeg"

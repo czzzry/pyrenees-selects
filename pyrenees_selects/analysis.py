@@ -3,9 +3,11 @@ from __future__ import annotations
 import math
 import platform
 import subprocess
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from typing import Any
 
 from .media import MediaToolError, require_media_tools
 
@@ -24,6 +26,15 @@ class AnalyzedRange:
     duration: float
     score: float
     reason: str
+
+
+@dataclass(frozen=True)
+class AnalyzedCandidate:
+    in_us: int
+    out_us: int
+    score: float
+    components: dict[str, float]
+    rationale: str
 
 
 def _frame_metrics(frame: bytes, previous: bytes | None) -> tuple[float, float, float]:
@@ -68,14 +79,12 @@ def _reason(metrics: dict[str, float]) -> str:
         "detail": "strong visible detail",
         "movement": "steady scenic movement",
         "consistency": "a sustained, uninterrupted view",
+        "audio_activity": "measured audio activity",
     }
-    return f"Surfaced by sparse analysis for {labels[strengths[0]]} and {labels[strengths[1]]}."
+    return f"Suggested from measured signals: {labels[strengths[0]]} and {labels[strengths[1]]}."
 
 
-def analyze_video(source: Path, duration: float, cancel: Event | None = None, ffmpeg: str | None = None) -> AnalyzedRange:
-    if duration <= 0:
-        raise ValueError("duration must be positive")
-    tool = ffmpeg or require_media_tools()[0]
+def _visual_samples(source: Path, cancel: Event | None, tool: str) -> list[tuple[float, float, float]]:
     command = [tool, "-v", "error"]
     if platform.system() == "Darwin":
         command.extend(["-hwaccel", "videotoolbox"])
@@ -107,19 +116,155 @@ def analyze_video(source: Path, duration: float, cancel: Event | None = None, ff
         if process.poll() is None:
             process.kill()
             process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+    return metrics
 
-    if not metrics:
+
+def _audio_samples(source: Path, cancel: Event | None, tool: str) -> list[float]:
+    sample_rate = 1_000
+    bytes_per_window = int(sample_rate * SAMPLE_SECONDS * 2)
+    command = [
+        tool, "-v", "error", "-i", str(source), "-vn", "-sn", "-map", "0:a:0?",
+        "-ac", "1", "-ar", str(sample_rate), "-f", "s16le", "-",
+    ]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    activity: list[float] = []
+    try:
+        assert process.stdout is not None
+        while True:
+            if cancel and cancel.is_set():
+                process.terminate()
+                raise InterruptedError("Analysis cancelled.")
+            chunk = process.stdout.read(bytes_per_window)
+            if not chunk:
+                break
+            usable = chunk[: len(chunk) - (len(chunk) % 2)]
+            values = array("h")
+            values.frombytes(usable)
+            rms = math.sqrt(sum(value * value for value in values) / max(1, len(values)))
+            activity.append(min(1.0, rms / 8_000.0))
+        if process.wait() != 0:
+            # Optional audio absence is not a failed visual analysis.
+            return []
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+    return activity
+
+
+def candidates_from_metrics(
+    visual: list[tuple[float, float, float]],
+    *,
+    duration: float,
+    budget_seconds: float,
+    shot_min_seconds: float,
+    shot_max_seconds: float,
+    audio: list[float] | None = None,
+    audio_preference: str = "visual",
+) -> list[AnalyzedCandidate]:
+    if not visual:
+        raise MediaToolError("No analysis samples could be read.")
+    if duration <= 0 or budget_seconds <= 0:
+        return []
+    if duration < shot_min_seconds:
+        score, components = _window_score(visual)
+        if audio and audio_preference != "visual":
+            components["audio_activity"] = sum(audio) / len(audio)
+            score = score * 0.88 + components["audio_activity"] * 0.12
+        return [AnalyzedCandidate(0, max(1, round(duration * 1_000_000)), round(score, 4), components, _reason(components))]
+    if budget_seconds < shot_min_seconds:
+        # Do not manufacture a minimum-length shot that exceeds the entire
+        # candidate budget. The plan reports the resulting shortfall honestly.
+        return []
+
+    requested = math.floor(budget_seconds / shot_min_seconds)
+    window_seconds = min(shot_max_seconds, max(shot_min_seconds, budget_seconds / requested))
+    window_size = max(1, math.ceil(window_seconds / SAMPLE_SECONDS))
+    possibilities: list[tuple[float, int, dict[str, float]]] = []
+    for index in range(0, max(1, len(visual) - window_size + 1)):
+        segment = visual[index:index + window_size]
+        if not segment:
+            continue
+        score, components = _window_score(segment)
+        if audio and audio_preference != "visual":
+            audio_window = audio[index:index + window_size]
+            if audio_window:
+                components["audio_activity"] = sum(audio_window) / len(audio_window)
+                weight = 0.12 if audio_preference == "speech_and_distinctive" else 0.06
+                score = score * (1 - weight) + components["audio_activity"] * weight
+        possibilities.append((score, index, components))
+
+    chosen: list[AnalyzedCandidate] = []
+    occupied: list[tuple[float, float]] = []
+    for score, index, components in sorted(possibilities, key=lambda item: (-item[0], item[1])):
+        start = min(index * SAMPLE_SECONDS, max(0.0, duration - window_seconds))
+        end = min(duration, start + window_seconds)
+        if any(start < other_end + SAMPLE_SECONDS and end + SAMPLE_SECONDS > other_start for other_start, other_end in occupied):
+            continue
+        occupied.append((start, end))
+        chosen.append(AnalyzedCandidate(
+            round(start * 1_000_000),
+            round(end * 1_000_000),
+            round(score, 4),
+            {key: round(value, 4) for key, value in components.items()},
+            _reason(components),
+        ))
+        if len(chosen) >= requested:
+            break
+    return sorted(chosen, key=lambda candidate: candidate.in_us)
+
+
+def analyze_video_candidates(
+    source: Path,
+    duration: float,
+    *,
+    budget_seconds: float,
+    shot_min_seconds: float,
+    shot_max_seconds: float,
+    audio_preference: str = "visual",
+    has_audio: bool = False,
+    cancel: Event | None = None,
+    ffmpeg: str | None = None,
+) -> list[AnalyzedCandidate]:
+    tool = ffmpeg or require_media_tools()[0]
+    visual = _visual_samples(source, cancel, tool)
+    if not visual:
         raise MediaToolError(f"No analysis samples could be read from {source.name}.")
-    window_size = max(1, min(len(metrics), math.ceil(TARGET_SECONDS / SAMPLE_SECONDS)))
-    margin = 2 if len(metrics) >= window_size + 4 else 0
-    starts = range(margin, max(margin + 1, len(metrics) - window_size - margin + 1))
-    best_index = 0
-    best_score = -1.0
-    best_metrics: dict[str, float] = {}
-    for index in starts:
-        score, components = _window_score(metrics[index:index + window_size])
-        if score > best_score:
-            best_index, best_score, best_metrics = index, score, components
-    candidate_duration = min(TARGET_SECONDS, duration)
-    start_seconds = min(best_index * SAMPLE_SECONDS, max(0.0, duration - candidate_duration))
-    return AnalyzedRange(start_seconds, candidate_duration, round(best_score, 4), _reason(best_metrics))
+    audio = _audio_samples(source, cancel, tool) if has_audio and audio_preference != "visual" else []
+    return candidates_from_metrics(
+        visual,
+        duration=duration,
+        budget_seconds=budget_seconds,
+        shot_min_seconds=shot_min_seconds,
+        shot_max_seconds=shot_max_seconds,
+        audio=audio,
+        audio_preference=audio_preference,
+    )
+
+
+def analyze_video(source: Path, duration: float, cancel: Event | None = None, ffmpeg: str | None = None) -> AnalyzedRange:
+    if duration <= 0:
+        raise ValueError("duration must be positive")
+    candidate = analyze_video_candidates(
+        source,
+        duration,
+        budget_seconds=min(TARGET_SECONDS, duration),
+        shot_min_seconds=min(TARGET_SECONDS, duration),
+        shot_max_seconds=min(TARGET_SECONDS, duration),
+        cancel=cancel,
+        ffmpeg=ffmpeg,
+    )[0]
+    return AnalyzedRange(
+        candidate.in_us / 1_000_000,
+        (candidate.out_us - candidate.in_us) / 1_000_000,
+        candidate.score,
+        candidate.rationale,
+    )

@@ -5,8 +5,12 @@
 The public path is a local-only application with a stable command interface for humans and LLM agents:
 
 - `preeditor.py` is the deep domain module. It owns projects, multiple footage roots, durable source identity, multiple selections per source, comments and markers, immutable sequence versions, alternates, and approval-gated proposals.
+- `candidate_planner.py` is a pure deterministic planning module. It turns target duration, shot rhythm, candidate breadth, and unique readable source durations into exact candidate-budget and count bounds plus a documented disk estimate.
+- `overnight.py` owns immutable run snapshots, persisted per-source stages, restart recovery, pause/cancel/retry/skip, power assertions, generated candidates, atomic candidate-to-selection review, and cache containment.
+- `analysis.py` sparsely measures real temporal samples and can return multiple non-overlapping candidate windows per source. Its rationale vocabulary is limited to measured exposure, visible detail, movement, consistency, and audio activity.
 - `preeditor_server.py` exposes a narrow loopback-only API and validates media against source records before serving it.
-- `static/preeditor.*` implements project setup, full-source range review, comments, sequencing, assistant proposal review, preview, and export without a frontend build step.
+- `static/preeditor.*` implements the production brief → overnight plan → run lifecycle → human candidate review → assembly flow, plus manual source review and assistant proposal review, without a frontend build step.
+- `review_proxies.py` owns deterministic, audio-preserving full-source review copies and a resumable background queue. A review copy is never used as the Resolve export source.
 - `sequence_export.py` compiles the same sequence version into a disposable preview and a DaVinci Resolve FCPXML handoff linked to originals.
 - `assistant.py` is an optional provider adapter. It sends a path-free project manifest—not media—to OpenAI and persists the answer only as a pending proposal.
 - `cli.py` is the agent contract. Codex, Claude, or a script can inspect bounded context and create a proposal without editing SQLite directly.
@@ -17,7 +21,7 @@ The older modules described below remain the Pyrenees case study and regression 
 
 ## Shape
 
-Pyrenees Selects is a local-only web application with no account, remote service, or frontend build step.
+The historical Pyrenees case-study application is a local-only web application with no account, remote service, or frontend build step.
 
 - `pyrenees_selects/server.py`: localhost HTTP server and narrow JSON/media API.
 - `pyrenees_selects/store.py`: SQLite schema and durable project, media, candidate, preserved screening, refinement-note, edit-plan, storyboard-review, and separate storyboard-comment state.
@@ -41,15 +45,23 @@ Original files are read-only inputs. A candidate stores:
 - handle duration;
 - chapter, rationale, score, decision, and optional story role.
 
-The review proxy is not the edit decision. It can be deleted and regenerated from the source identity and range.
+Neither a full-source review copy nor a range preview is the edit decision. Both can be deleted and regenerated from the original and saved metadata.
 
 ## Cache
 
-Review clips live under the application data directory. Cache keys include the resolved source path, file size, nanosecond modification time, source range, asset kind, and rendering-policy version. The first-pass review can stream the untouched source file directly on demand, so it does not create another proxy or copy for full-video playback.
+Review media lives under the application data directory. Cache keys include the resolved source path, file size, nanosecond modification time, source range, asset kind, and rendering-policy version. The reusable app can stream the untouched source on demand or prepare full-length, audio-preserving H.264 review copies in a resumable background queue. The source player lets the user switch between the review copy and original. Export always links back to the untouched original.
 
-The initial review clip is H.264 at 360p with no audio. This keeps the 192-minute HEVC archive usable on the Intel Mac while retaining the original 4K media for Resolve. Unattended preparation is resumable at file boundaries, records progress outside the footage folder, and holds a macOS power assertion only while work is active.
+The Pyrenees case study also retains its older H.264 360p, silent range-preview cache. That specialized cache keeps the 192-minute HEVC archive usable on the Intel Mac while retaining the original 4K media for Resolve. Its unattended preparation is resumable at file boundaries, records progress outside the footage folder, and holds a macOS power assertion only while work is active.
 
-## Current Vertical Slice
+## Current reusable vertical slice
+
+The reusable path now persists a canonical project brief, calculates candidate duration/count and disk requirements, snapshots the brief and ordered source fingerprints into a run, and works one source at a time. Each source passes through proxying, sparse analysis, and exact sample rendering. A sample is published only after FFmpeg exits, ffprobe validates it, and a unique partial path is atomically renamed. Interrupted active work becomes paused on restart. A macOS sleep assertion exists only while a run is active.
+
+Generated candidates, LLM proposals, and user selections are separate records. Keeping or marking Maybe creates a durable editorial selection; skipping does not. Candidate regeneration cannot overwrite comments. Sequence items freeze their source fingerprint, range, note, role, audio intent, and treatment, so later selection changes cannot rewrite an earlier preview or handoff.
+
+Canonical candidate times are integer microseconds. CFR range edits snap outward to frame boundaries; VFR ranges retain microsecond timing and are labelled in the open handoff manifest. Preview and export revalidate the current original fingerprint and compile from the same frozen sequence snapshot.
+
+## Pyrenees case-study vertical slice
 
 The current slice scans real metadata, sparsely analyzes 160×90 frames with VideoToolbox acceleration on macOS, persists one scored sustained candidate per source, prepares review assets, and records decisions. First-pass screening includes an embedded full-source player with a jump-to-selection control and an autosaved comment. Once screening is complete, it snapshots the original outcome and exposes only Keeps and Maybes for a second pass. Refinement reuses the prepared 360p selection and carries the comment forward as an editable note with an optional source timestamp; it does not alter the source range or original decision.
 
@@ -63,7 +75,7 @@ That comparison is a focused hybrid-review mode rather than another full-film pa
 
 ## Deferred from the public v1
 
-- Automatic semantic footage analysis; the current assistant reasons over human selections and comments, not unseen pixels.
+- Automatic semantic footage understanding. The local engine measures technical temporal signals; it does not identify subjects, transcribe speech, or understand creative direction. The optional assistant still reasons only over bounded project metadata and human decisions.
 - Guide-track analysis.
 - Owner review of the completed hybrid and any later 90-second derivation.
 - OpenTimelineIO export (Resolve FCPXML is implemented).

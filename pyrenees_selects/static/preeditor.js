@@ -1,6 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
-const state = { projects: [], project: null, sources: [], selections: [], sequences: [], proposals: [], source: null, filter: "all", search: "", sequenceIds: [], sequence: null, playingRange: false, editingSelection: null };
+const state = { projects: [], project: null, sources: [], selections: [], sequences: [], proposals: [], review_proxies: null, latest_run: null, source: null, filter: "all", search: "", sequenceIds: [], sequence: null, playingRange: false, editingSelection: null, mediaMode: "original", proxyTimer: null, runTimer: null, candidate: null, candidateFilter: "all", candidateMediaMode: "sample" };
 
 async function request(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
@@ -13,6 +13,7 @@ async function request(path, options = {}) {
 }
 function seconds(value) { const n = Number(value || 0); return `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, "0")}`; }
 function exact(value) { return Number(value || 0).toFixed(2); }
+function bytes(value) { const n = Number(value || 0); if (n < 1024 ** 2) return `${Math.max(0, Math.round(n / 1024))} KB`; if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`; return `${(n / 1024 ** 3).toFixed(1)} GB`; }
 function setStatus(element, message, error = false) { element.textContent = message; element.classList.toggle("is-error", error); }
 function toast(message) { const node = $("#toast"); node.textContent = message; node.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { node.hidden = true; }, 3000); }
 
@@ -23,9 +24,11 @@ async function loadProjects(preferred) {
   await openProject(state.projects.some(project => project.id === id) ? id : state.projects[0].id);
 }
 function showWelcome() {
-  $("#welcome").hidden = false; $$(".workspace, .assemble, .assistant, .tabs, .project-switcher").forEach(node => node.hidden = true);
+  if (state.proxyTimer) clearTimeout(state.proxyTimer);
+  if (state.runTimer) clearTimeout(state.runTimer);
+  $("#welcome").hidden = false; $$(".readiness, .workspace, .assemble, .assistant, .product-stage, .candidate-workspace, .tabs, .project-switcher").forEach(node => node.hidden = true);
 }
-async function openProject(id) {
+async function openProject(id, options = {}) {
   const payload = await request(`/api/projects/${id}`);
   Object.assign(state, payload, { source: null, sequenceIds: [] });
   state.sequence = null;
@@ -36,14 +39,243 @@ async function openProject(id) {
   localStorage.setItem("selects-project", id);
   $("#welcome").hidden = true; $(".tabs").hidden = false; $(".project-switcher").hidden = false;
   $("#projectSelect").innerHTML = state.projects.map(project => `<option value="${project.id}" ${project.id === id ? "selected" : ""}>${escapeHtml(project.name)}</option>`).join("");
-  populateProjectSettings(); renderReview(); renderAssembly(); renderAssistant(); switchView("review");
+  populateProjectSettings(); renderReview(); renderAssembly(); renderAssistant(); renderProxyBanner();
+  if (!state.latest_run && state.sources.length && state.project.target_duration_seconds) {
+    try { state.latest_run = await request(`/api/projects/${id}/overnight-plan`, { method: "POST", body: JSON.stringify({ prevent_sleep: true }) }); }
+    catch (error) { setStatus($("#projectStatus"), error.message, true); }
+  }
+  if (options.view === "candidates" && state.latest_run?.candidates?.length) switchView("candidates");
+  else if (state.latest_run?.state === "planned") switchView("prepare");
+  else if (state.latest_run && !["completed", "completed_with_warnings"].includes(state.latest_run.state)) switchView("prepare");
+  else if (state.latest_run?.candidates?.length) switchView("candidates");
+  else switchView("prepare");
+  if (state.review_proxies?.state === "running") startProxyPolling();
+  if (["running", "pausing", "cancelling"].includes(state.latest_run?.state)) startRunPolling();
 }
 function switchView(view) {
-  $("#reviewView").hidden = view !== "review"; $("#assembleView").hidden = view !== "assemble"; $("#assistantView").hidden = view !== "assistant";
+  $("#readinessView").hidden = true; $(".tabs").hidden = false;
+  $("#planView").hidden = true; $("#runView").hidden = true; $("#candidateView").hidden = view !== "candidates";
+  $("#reviewView").hidden = view !== "sources"; $("#assembleView").hidden = view !== "assemble"; $("#assistantView").hidden = view !== "assistant";
+  if (view === "prepare") {
+    if (state.latest_run && state.latest_run.state !== "planned") { $("#runView").hidden = false; renderRun(); }
+    else { $("#planView").hidden = false; renderPlan(); }
+  }
   $$(".tabs button").forEach(button => button.setAttribute("aria-current", button.dataset.view === view ? "page" : "false"));
+  if (view === "candidates") renderCandidates(); if (view === "sources") renderReview();
   if (view === "assemble") renderAssembly(); if (view === "assistant") renderAssistant();
 }
+function renderReadiness() {
+  $("#welcome").hidden = true; $(".tabs").hidden = true; $$(".workspace, .assemble, .assistant").forEach(node => node.hidden = true); $("#readinessView").hidden = false;
+  $("#readinessTitle").textContent = `${state.summary.source_count} clip${state.summary.source_count === 1 ? "" : "s"}. Ready to screen without surprises.`;
+  $("#readinessSize").textContent = `${seconds(state.summary.total_seconds)} · ${bytes(state.summary.total_bytes)}`;
+  $("#readinessReady").textContent = `${state.summary.ready_count} clips`;
+  $("#readinessPortrait").textContent = `${state.summary.portrait_count} clips`;
+  $("#readinessSilent").textContent = `${state.summary.silent_count} clips`;
+  $("#readinessAttention").textContent = `${state.summary.attention_count} clips`;
+  $("#proxyEstimate").textContent = bytes(state.review_proxies?.estimated_bytes);
+  setStatus($("#readinessStatus"), state.summary.attention_count ? "Clips that need attention remain visible and will not stop the rest." : "All readable clips are ready.");
+}
+function applyProxyStatus(status) {
+  const currentHadReviewCopy = Boolean(state.source?.review_media_url);
+  state.review_proxies = status;
+  const ready = new Set(status.ready_source_ids || []);
+  state.sources.forEach(source => { source.review_media_url = ready.has(source.id) ? `/api/sources/${source.id}/review-media` : null; });
+  if (state.source) state.source = state.sources.find(source => source.id === state.source.id) || state.source;
+  if (state.source?.review_media_url && !currentHadReviewCopy && $("#sourceVideo").paused) setSourceMedia("review", $("#sourceVideo").currentTime);
+  renderProxyBanner(); updateMediaModeButton();
+}
+function renderProxyBanner() {
+  const proxy = state.review_proxies; const banner = $("#proxyBanner");
+  if (!proxy || (!proxy.ready && proxy.state === "idle")) { banner.hidden = true; return; }
+  banner.hidden = false; $("#proxyProgress").max = Math.max(1, proxy.total); $("#proxyProgress").value = proxy.ready;
+  if (proxy.state === "running") { $("#proxyBannerTitle").textContent = `Preparing smoother review copies · ${proxy.ready} of ${proxy.total}`; $("#proxyBannerDetail").textContent = proxy.running_filename ? `Now preparing ${proxy.running_filename}. You can keep reviewing.` : "Starting the background queue…"; }
+  else if (proxy.state === "ready") { $("#proxyBannerTitle").textContent = `All ${proxy.ready} review copies are ready`; $("#proxyBannerDetail").textContent = "Selects uses them by default; the full original remains one click away."; }
+  else { $("#proxyBannerTitle").textContent = `${proxy.ready} review copies ready · ${proxy.failed} need attention`; $("#proxyBannerDetail").textContent = "Retry preparation to continue past failed files."; }
+}
+function startProxyPolling() {
+  if (state.proxyTimer) clearTimeout(state.proxyTimer);
+  const poll = async () => {
+    try { const status = await request(`/api/projects/${state.project.id}/review-proxies`); applyProxyStatus(status); if (status.state === "running") state.proxyTimer = setTimeout(poll, 1200); else if (status.state === "ready") toast("Smooth review copies are ready"); }
+    catch (error) { toast(error.message); }
+  };
+  state.proxyTimer = setTimeout(poll, 600);
+}
+async function prepareReviewProxies() {
+  try { $("#prepareProxiesButton").disabled = true; setStatus($("#readinessStatus"), "Starting the resumable background queue…"); const status = await request(`/api/projects/${state.project.id}/review-proxies`, { method: "POST", body: "{}" }); applyProxyStatus(status); localStorage.setItem(`selects-readiness-${state.project.id}`, "done"); switchView("sources"); startProxyPolling(); }
+  catch (error) { setStatus($("#readinessStatus"), error.message, true); }
+  finally { $("#prepareProxiesButton").disabled = false; }
+}
+function reviewOriginals() { localStorage.setItem(`selects-readiness-${state.project.id}`, "done"); switchView("sources"); }
 function escapeHtml(value) { const div = document.createElement("div"); div.textContent = String(value ?? ""); return div.innerHTML; }
+
+function renderPlan() {
+  const run = state.latest_run;
+  const empty = Number(state.summary?.ready_count || 0) === 0;
+  $("#planEmptyState").hidden = !empty;
+  $("#planView > .metric-strip").hidden = empty;
+  $("#planView > .plan-grid").hidden = empty;
+  if (empty) return;
+  if (!run) {
+    setStatus($("#planStatus"), state.sources.length ? "Choose a target length in project settings to calculate the overnight plan." : "Add a readable footage folder first.", true);
+    $("#startOvernightButton").disabled = true;
+    return;
+  }
+  const plan = run.plan; const disk = plan.disk;
+  $("#planFootage").textContent = seconds(plan.readable_source_duration);
+  $("#planCandidateTime").textContent = seconds(plan.candidate_duration_target);
+  $("#planCandidateCount").textContent = plan.minimum_candidate_count === plan.maximum_candidate_count ? String(plan.minimum_candidate_count) : `${plan.minimum_candidate_count}–${plan.maximum_candidate_count}`;
+  $("#planRuntime").textContent = plan.runtime?.seconds ? seconds(plan.runtime.seconds) : "Estimating…";
+  $("#planReady").textContent = `${run.source_snapshot.length} clips`;
+  $("#planDuplicates").textContent = `${plan.duplicate_source_ids.length} clips`;
+  const inventory = plan.inventory || {};
+  $("#planPortrait").textContent = `${inventory.portrait || 0} clips`;
+  $("#planSilent").textContent = `${inventory.silent || 0} clips`;
+  $("#planVfr").textContent = `${inventory.vfr || 0} clips`;
+  $("#planShort").textContent = `${inventory.very_short || 0} clips`;
+  $("#planAttention").textContent = `${(inventory.broken || 0) + (inventory.offline || 0)} clips`;
+  $("#planUnsupported").textContent = `${inventory.unsupported || 0} files`;
+  $("#planArtifacts").textContent = bytes(disk.estimated_artifact_bytes);
+  $("#planReserve").textContent = bytes(disk.safety_reserve_bytes);
+  $("#planAvailable").textContent = bytes(disk.available_bytes);
+  $("#preventSleep").checked = Boolean(run.prevent_sleep);
+  $("#planDiskWarning").hidden = disk.can_start;
+  $("#planDiskDetail").textContent = disk.can_start ? "" : `${bytes(disk.shortfall_bytes)} more is required, including the safety reserve.`;
+  $("#startOvernightButton").disabled = !disk.can_start || run.stale;
+  setStatus($("#planStatus"), run.stale ? "This plan is stale because footage or settings changed. Create a fresh plan." : `Calculated from ${run.source_snapshot.length} unique readable sources.`, run.stale);
+}
+
+async function rebuildPlan(cachePath = "") {
+  try {
+    setStatus($("#planStatus"), "Recalculating from the current folder and project brief…");
+    state.latest_run = await request(`/api/projects/${state.project.id}/overnight-plan`, { method: "POST", body: JSON.stringify({ cache_path: cachePath || undefined, prevent_sleep: $("#preventSleep").checked }) });
+    renderPlan();
+  } catch (error) { setStatus($("#planStatus"), error.message, true); }
+}
+
+async function startOvernight() {
+  if (!state.latest_run) return;
+  try {
+    $("#startOvernightButton").disabled = true;
+    setStatus($("#planStatus"), "Starting the checkpointed queue…");
+    state.latest_run = await request(`/api/runs/${state.latest_run.id}/start`, { method: "POST", body: "{}" });
+    switchView("prepare"); startRunPolling();
+  } catch (error) { setStatus($("#planStatus"), error.message, true); $("#startOvernightButton").disabled = false; }
+}
+
+function renderRun() {
+  const run = state.latest_run; if (!run) return;
+  const activeSource = run.sources.find(item => ["proxying", "analyzing", "rendering"].includes(item.state));
+  const percent = Math.round(Number(run.progress_fraction || 0) * 100);
+  const labels = { planned: "Ready", running: "Running", pausing: "Pausing", paused: "Paused safely", cancelling: "Cancelling", cancelled: "Cancelled", completed: "Complete", completed_with_warnings: "Complete with warnings", failed: "Needs attention", stale: "Plan changed" };
+  $("#runState").textContent = labels[run.state] || run.state;
+  $("#runState").classList.toggle("is-warning", ["failed", "completed_with_warnings", "stale"].includes(run.state));
+  $("#runStageLabel").textContent = activeSource ? activeSource.stage : labels[run.state] || run.state;
+  $("#runFilename").textContent = activeSource?.filename || (run.state === "completed" ? "Every readable source is prepared" : "Stopped at a saved checkpoint");
+  $("#runPercent").textContent = `${percent}%`; $("#runProgress").value = Number(run.progress_fraction || 0);
+  $("#runCompleted").textContent = `${run.progress_processed} of ${run.progress_total} tasks`;
+  $("#runElapsed").textContent = `Elapsed ${seconds(run.elapsed_seconds)}`;
+  $("#runEta").textContent = run.eta_seconds == null ? "Estimating…" : `About ${seconds(run.eta_seconds)} left · measured here`;
+  $("#pauseRunButton").hidden = run.state !== "running"; $("#resumeRunButton").hidden = run.state !== "paused";
+  $("#cancelRunButton").hidden = ["cancelled", "completed", "completed_with_warnings", "failed"].includes(run.state);
+  $("#reviewReadyButton").disabled = !run.candidates.length;
+  $("#runCacheRecovery").hidden = !(run.state === "paused" && /space|disk|cache/i.test(run.warning || ""));
+  $("#sleepGuarantee").textContent = run.prevent_sleep ? "This Mac stays awake only while the run is active" : "Sleep prevention is off for this run";
+  const failures = run.sources.filter(item => ["failed", "skipped"].includes(item.state));
+  $("#runFailures").innerHTML = failures.map(item => `<article class="failure-card"><strong>${escapeHtml(item.filename)}</strong><p>${escapeHtml(item.error || "Skipped from this run")}</p><div class="button-row"><button class="quiet" data-retry-source="${item.source_id}" type="button">Retry</button><button class="quiet" data-skip-source="${item.source_id}" type="button">Skip</button></div></article>`).join("");
+  $$('[data-retry-source]').forEach(button => button.addEventListener("click", () => retryRunSource(button.dataset.retrySource)));
+  $$('[data-skip-source]').forEach(button => button.addEventListener("click", () => skipRunSource(button.dataset.skipSource)));
+  setStatus($("#runStatus"), run.error || run.warning || (run.candidates.length ? `${run.candidates.length} playable proposal${run.candidates.length === 1 ? "" : "s"} ready now.` : "The first playable proposal will appear after one source completes."), Boolean(run.error));
+}
+
+function startRunPolling() {
+  if (state.runTimer) clearTimeout(state.runTimer);
+  const poll = async () => {
+    try {
+      state.latest_run = await request(`/api/runs/${state.latest_run.id}`); renderRun();
+      if (!$("#candidateView").hidden) renderCandidates(true);
+      if (["running", "pausing", "cancelling"].includes(state.latest_run.state)) state.runTimer = setTimeout(poll, 1000);
+      else if (["completed", "completed_with_warnings"].includes(state.latest_run.state)) toast("Overnight proposals are ready to review");
+    } catch (error) { setStatus($("#runStatus"), error.message, true); }
+  };
+  state.runTimer = setTimeout(poll, 500);
+}
+
+async function runAction(action) {
+  try { state.latest_run = await request(`/api/runs/${state.latest_run.id}/${action}`, { method: "POST", body: "{}" }); renderRun(); if (action === "start") startRunPolling(); }
+  catch (error) { setStatus($("#runStatus"), error.message, true); }
+}
+async function retryRunSource(sourceId) { try { state.latest_run = await request(`/api/runs/${state.latest_run.id}/retry`, { method: "POST", body: JSON.stringify({ source_ids: [sourceId] }) }); renderRun(); startRunPolling(); } catch (error) { setStatus($("#runStatus"), error.message, true); } }
+async function skipRunSource(sourceId) { try { state.latest_run = await request(`/api/runs/${state.latest_run.id}/skip`, { method: "POST", body: JSON.stringify({ source_ids: [sourceId] }) }); renderRun(); } catch (error) { setStatus($("#runStatus"), error.message, true); } }
+async function moveRunCache() {
+  const input = $("#runCachePath");
+  if (window.pywebview?.api?.choose_folder && !input.value) { const chosen = await window.pywebview.api.choose_folder(""); if (chosen) input.value = chosen; }
+  if (!input.value) { input.focus(); toast("Choose or paste a new cache folder."); return; }
+  try { setStatus($("#runStatus"), "Copying completed samples to the new cache…"); state.latest_run = await request(`/api/runs/${state.latest_run.id}/cache`, { method: "POST", body: JSON.stringify({ path: input.value }) }); renderRun(); }
+  catch (error) { setStatus($("#runStatus"), error.message, true); }
+}
+
+function renderCandidates(preserveEditor = false) {
+  const run = state.latest_run; if (!run) return;
+  const all = run.candidates.filter(item => item.sample_ready);
+  const visible = all.filter(item => state.candidateFilter === "all" || item.review_state === state.candidateFilter);
+  const reviewed = all.filter(item => item.review_state !== "unreviewed").length;
+  const remaining = run.sources.filter(item => !["completed", "failed", "skipped", "cancelled"].includes(item.state)).length;
+  $("#candidateSummary").textContent = `${reviewed} of ${all.length} ready proposals reviewed${remaining ? ` · ${remaining} source${remaining === 1 ? "" : "s"} still preparing` : ""} · ranking is only a suggestion`;
+  const currentId = state.candidate?.id;
+  const freshCurrent = currentId ? all.find(item => item.id === currentId) : null;
+  if (freshCurrent) state.candidate = freshCurrent;
+  $("#candidateList").innerHTML = visible.map(item => `<button class="candidate-card ${state.candidate?.id === item.id ? "is-current" : ""}" data-candidate="${item.id}" type="button"><span class="rank">${String(item.rank || "—").padStart(2, "0")}</span><span><strong>${escapeHtml(item.filename)}</strong><small>${exact(item.in_seconds)}–${exact(item.out_seconds)} · ${exact(item.duration)} s</small></span><span class="review-pill ${item.review_state}">${item.review_state}</span></button>`).join("") || `<p class="status source-limit">No proposals match this filter yet.</p>`;
+  $$('[data-candidate]').forEach(button => button.addEventListener("click", () => chooseCandidate(button.dataset.candidate)));
+  if (!state.candidate || !all.some(item => item.id === state.candidate.id)) state.candidate = visible[0] || all[0] || null;
+  if (state.candidate && !(preserveEditor && freshCurrent)) showCandidate(state.candidate.id);
+  else if (!state.candidate) clearCandidate();
+}
+
+function clearCandidate() {
+  $("#candidateTitle").textContent = "No playable proposals yet"; $("#candidateFacts").textContent = "You can review full sources while preparation continues.";
+  $("#candidateVideo").removeAttribute("src"); $("#candidateVideo").load(); $("#saveCandidateButton").disabled = true;
+}
+function chooseCandidate(id) { const candidate = state.latest_run.candidates.find(item => item.id === id); if (!candidate) return; state.candidate = candidate; state.candidateMediaMode = "sample"; renderCandidates(); }
+function showCandidate(id) {
+  const candidate = state.latest_run.candidates.find(item => item.id === id); if (!candidate) return;
+  state.candidate = candidate; $("#saveCandidateButton").disabled = false;
+  $("#candidateTitle").textContent = candidate.filename;
+  $("#candidateFacts").textContent = `${exact(candidate.in_seconds)}–${exact(candidate.out_seconds)} · ${candidate.width || "?"}×${candidate.height || "?"} · source time`;
+  $("#candidateIn").value = exact(candidate.in_seconds); $("#candidateOut").value = exact(candidate.out_seconds);
+  $("#candidateIn").max = candidate.source_duration; $("#candidateOut").max = candidate.source_duration;
+  $("#candidateComment").value = candidate.comment || ""; $("#candidateRole").value = candidate.story_role || ""; $("#candidateAudio").value = candidate.audio_intent || "undecided";
+  const decision = candidate.review_state === "kept" ? "keep" : candidate.review_state === "skipped" ? "skip" : candidate.review_state === "maybe" ? "maybe" : "maybe";
+  const radio = $(`input[name="candidateDecision"][value="${decision}"]`); if (radio) radio.checked = true;
+  $("#candidateRationale").textContent = candidate.rationale;
+  setCandidateMedia(state.candidateMediaMode);
+  updateCandidateRange();
+}
+function setCandidateMedia(mode) {
+  const candidate = state.candidate; if (!candidate) return; const video = $("#candidateVideo");
+  state.candidateMediaMode = mode === "source" ? "source" : "sample";
+  video.src = state.candidateMediaMode === "source" ? `/api/runs/${state.latest_run.id}/sources/${candidate.source_id}/media` : `/api/candidates/${candidate.id}/media`;
+  video.load();
+  if (state.candidateMediaMode === "source") video.addEventListener("loadedmetadata", () => { video.currentTime = Number($("#candidateIn").value); }, { once: true });
+  $("#candidateMediaMode").textContent = state.candidateMediaMode === "source" ? "Back to proposed sample" : "Open full source";
+  const generatedIn = Number(candidate.generated_in_us) / 1e6; const generatedOut = Number(candidate.generated_out_us) / 1e6;
+  $("#candidateScrubber").min = state.candidateMediaMode === "source" ? 0 : generatedIn;
+  $("#candidateScrubber").max = state.candidateMediaMode === "source" ? candidate.source_duration : generatedOut;
+  $("#candidateScrubber").value = state.candidateMediaMode === "source" ? candidate.in_seconds : generatedIn;
+}
+function updateCandidateRange() { const start = Number($("#candidateIn").value); const end = Number($("#candidateOut").value); $("#candidateRangeLabel").textContent = `${exact(Math.max(0, end - start))} seconds selected`; }
+async function saveCandidateDecision() {
+  if (!state.candidate) return;
+  const selected = $('input[name="candidateDecision"]:checked');
+  const body = { decision: selected?.value || "maybe", in_us: Math.round(Number($("#candidateIn").value) * 1e6), out_us: Math.round(Number($("#candidateOut").value) * 1e6), comment: $("#candidateComment").value, story_role: $("#candidateRole").value || null, audio_intent: $("#candidateAudio").value };
+  try {
+    setStatus($("#candidateStatus"), "Saving your exact range and comment…");
+    const saved = await request(`/api/candidates/${state.candidate.id}`, { method: "PATCH", body: JSON.stringify(body) });
+    const index = state.latest_run.candidates.findIndex(item => item.id === saved.id); state.latest_run.candidates[index] = saved; state.candidate = saved;
+    const payload = await request(`/api/projects/${state.project.id}`); state.selections = payload.selections; state.sequences = payload.sequences;
+    renderCandidates(); renderAssembly(); setStatus($("#candidateStatus"), "Saved. This decision and comment will survive regeneration."); toast("Editorial decision saved");
+  } catch (error) { setStatus($("#candidateStatus"), error.message, true); }
+}
+
 function sourceSelections(sourceId) { return state.selections.filter(selection => selection.source_id === sourceId); }
 function renderReview() {
   $("#reviewProgress").textContent = `${state.summary.reviewed_count} of ${state.summary.source_count} sources reviewed`;
@@ -58,7 +290,9 @@ function renderReview() {
     return `<button class="source-row ${state.source?.id === source.id ? "is-current" : ""}" data-source="${source.id}" type="button"><span class="ordinal">${String(index + 1).padStart(2, "0")}</span><span><strong>${escapeHtml(source.filename)}</strong><small>${seconds(source.duration)} · ${source.width || "?"}×${source.height || "?"}</small></span><span class="decision-dot ${decision}" title="${selections.length} selections" aria-label="${selections.length} saved selections"></span></button>`;
   }).join("") + (visible.length > shown.length ? `<p class="status source-limit">Showing the first ${shown.length} of ${visible.length}. Search to narrow the list.</p>` : "") || `<p class="status">No sources match this filter.</p>`;
   $$('[data-source]').forEach(button => button.addEventListener("click", () => chooseSource(button.dataset.source)));
-  if (!state.source && visible.length) chooseSource(visible[0].id);
+  const coachDone = state.project && localStorage.getItem(`selects-first-selection-${state.project.id}`) === "done";
+  $("#firstSelectionCoach").hidden = coachDone || !state.source || sourceSelections(state.source.id).length > 0;
+  if (!state.source && visible.length) chooseSource((visible.find(source => !sourceSelections(source.id).length) || visible[0]).id);
 }
 function chooseSource(id) {
   state.source = state.sources.find(source => source.id === id); if (!state.source) return;
@@ -67,13 +301,30 @@ function chooseSource(id) {
   $("#sourceStatus").textContent = state.source.status;
   const video = $("#sourceVideo");
   $("#offlineRelinkForm").hidden = state.source.status === "ready";
-  if (state.source.status === "ready") { video.src = state.source.media_url; video.load(); }
+  state.mediaMode = state.source.review_media_url ? "review" : "original";
+  if (state.source.status === "ready") { setSourceMedia(state.mediaMode, 0); }
   else { video.removeAttribute("src"); video.load(); }
   $("#inTime").max = state.source.duration || 0; $("#outTime").max = state.source.duration || 0; $("#rangeScrubber").max = state.source.duration || 0;
   $("#inTime").value = 0; $("#outTime").value = Math.min(Number(state.project.ideal_clip_duration || 8), Number(state.source.duration || 0)); updateRangeLabel();
   resetSelectionForm();
   renderSourceSelections(); renderReview();
 }
+function setSourceMedia(mode, resumeAt) {
+  if (!state.source) return;
+  const review = mode === "review" && state.source.review_media_url;
+  state.mediaMode = review ? "review" : "original";
+  const video = $("#sourceVideo"); const timestamp = Number(resumeAt || 0);
+  video.src = review ? state.source.review_media_url : state.source.original_media_url || state.source.media_url;
+  video.load();
+  if (timestamp) video.addEventListener("loadedmetadata", () => { video.currentTime = Math.min(timestamp, video.duration || timestamp); }, { once: true });
+  updateMediaModeButton();
+}
+function updateMediaModeButton() {
+  const button = $("#sourceMediaModeButton");
+  if (!state.source?.review_media_url) { button.hidden = true; return; }
+  button.hidden = false; button.textContent = state.mediaMode === "review" ? "View full original" : "Use smoother review copy";
+}
+function toggleSourceMedia() { const video = $("#sourceVideo"); setSourceMedia(state.mediaMode === "review" ? "original" : "review", video.currentTime); }
 function updateRangeLabel() { const start = Number($("#inTime").value); const end = Number($("#outTime").value); $("#rangeDuration").textContent = `${exact(Math.max(0, end - start))} s selected`; }
 function renderSourceSelections() {
   const items = state.source ? sourceSelections(state.source.id) : [];
@@ -102,7 +353,7 @@ async function archiveSelection() {
 async function saveSelection() {
   if (!state.source) return;
   const body = { project_id: state.project.id, source_id: state.source.id, in_seconds: Number($("#inTime").value), out_seconds: Number($("#outTime").value), decision: $('input[name="decision"]:checked').value, comment: $("#selectionComment").value, story_role: $("#storyRole").value || null, audio_intent: $("#audioIntent").value };
-  try { setStatus($("#selectionStatus"), "Saving…"); let selection; if (state.editingSelection) { const { project_id, source_id, ...changes } = body; selection = await request(`/api/selections/${state.editingSelection}`, { method: "PATCH", body: JSON.stringify(changes) }); const index = state.selections.findIndex(item => item.id === selection.id); state.selections[index] = selection; } else { selection = await request("/api/selections", { method: "POST", body: JSON.stringify(body) }); state.selections.push(selection); } state.summary.reviewed_count = new Set(state.selections.map(item => item.source_id)).size; state.summary.keep_seconds = state.selections.filter(item => item.decision === "keep").reduce((sum, item) => sum + item.duration, 0); const wasEditing = Boolean(state.editingSelection); state.editingSelection = selection.id; renderSourceSelections(); renderReview(); loadSelection(selection.id); setStatus($("#selectionStatus"), wasEditing ? "Selection updated." : "Saved. Choose Start another range to pull a second moment from this source."); toast(wasEditing ? "Selection updated" : "Selection saved"); } catch (error) { setStatus($("#selectionStatus"), error.message, true); }
+  try { setStatus($("#selectionStatus"), "Saving…"); let selection; if (state.editingSelection) { const { project_id, source_id, ...changes } = body; selection = await request(`/api/selections/${state.editingSelection}`, { method: "PATCH", body: JSON.stringify(changes) }); const index = state.selections.findIndex(item => item.id === selection.id); state.selections[index] = selection; } else { selection = await request("/api/selections", { method: "POST", body: JSON.stringify(body) }); state.selections.push(selection); } state.summary.reviewed_count = new Set(state.selections.map(item => item.source_id)).size; state.summary.keep_seconds = state.selections.filter(item => item.decision === "keep").reduce((sum, item) => sum + item.duration, 0); const wasEditing = Boolean(state.editingSelection); state.editingSelection = selection.id; localStorage.setItem(`selects-first-selection-${state.project.id}`, "done"); $("#firstSelectionCoach").hidden = true; renderSourceSelections(); renderReview(); loadSelection(selection.id); setStatus($("#selectionStatus"), wasEditing ? "Selection updated." : "Saved. Choose Start another range to pull a second moment from this source."); toast(wasEditing ? "Selection updated" : "Selection saved"); } catch (error) { setStatus($("#selectionStatus"), error.message, true); }
 }
 function playRange() { const video = $("#sourceVideo"); state.playingRange = true; video.currentTime = Number($("#inTime").value); video.play(); }
 
@@ -134,7 +385,7 @@ async function saveSequence() {
   try { setStatus($("#sequenceStatus"), "Saving a reversible version…"); const path = state.sequence ? `/api/sequences/${state.sequence.sequence_id}/versions` : "/api/sequences"; const body = state.sequence ? { selection_ids: state.sequenceIds, note: "Reordered in Selects" } : { project_id: state.project.id, name: "First cut", selection_ids: state.sequenceIds, target_duration: state.project.target_duration }; state.sequence = await request(path, { method: "POST", body: JSON.stringify(body) }); state.sequences = (await request(`/api/projects/${state.project.id}`)).sequences; $("#sequencePreview").hidden = true; setStatus($("#sequenceStatus"), `Saved version ${state.sequence.version}. Earlier versions remain intact.`); renderAssembly(); } catch (error) { setStatus($("#sequenceStatus"), error.message, true); }
 }
 async function renderSequencePreview() { if (!state.sequence) { await saveSequence(); if (!state.sequence) return; } const video = $("#sequencePreview"); setStatus($("#sequenceStatus"), "Rendering a lightweight end-to-end preview…"); video.hidden = false; video.src = `/api/sequences/${state.sequence.sequence_id}/preview?version=${state.sequence.version}&t=${Date.now()}`; video.load(); video.addEventListener("canplay", () => setStatus($("#sequenceStatus"), "Preview ready. This is intentionally low resolution; Resolve remains linked to originals."), { once: true }); video.addEventListener("error", () => setStatus($("#sequenceStatus"), "The preview could not be rendered. Check that every source is online, then try again.", true), { once: true }); }
-async function exportSequence() { if (!state.sequence) { setStatus($("#sequenceStatus"), "Save the sequence before exporting.", true); return; } try { const result = await request(`/api/sequences/${state.sequence.sequence_id}/export`); setStatus($("#sequenceStatus"), `Resolve handoff written to ${result.fcpxml}`); toast("DaVinci Resolve handoff ready"); } catch (error) { setStatus($("#sequenceStatus"), error.message, true); } }
+async function exportSequence() { if (!state.sequence) { setStatus($("#sequenceStatus"), "Save the sequence before exporting.", true); return; } try { const result = await request(`/api/sequences/${state.sequence.sequence_id}/export`, { method: "POST", body: "{}" }); setStatus($("#sequenceStatus"), "Resolve handoff written successfully."); $("#exportPath").textContent = result.fcpxml; $("#exportNextSteps").hidden = false; toast("DaVinci Resolve handoff ready"); } catch (error) { setStatus($("#sequenceStatus"), error.message, true); } }
 
 function renderAssistant() {
   if (!state.project) return;
@@ -151,7 +402,7 @@ async function decideProposal(id, apply) { try { await request(`/api/proposals/$
 
 function populateProjectSettings() {
   const form = $("#projectSettingsForm");
-  for (const key of ["name", "target_duration", "ideal_clip_duration", "orientation", "intent"]) {
+  for (const key of ["name", "target_duration_seconds", "shot_rhythm", "shot_min_seconds", "shot_max_seconds", "candidate_breadth", "audio_preference", "orientation", "intent"]) {
     if (form.elements[key]) form.elements[key].value = state.project[key] ?? "";
   }
 }
@@ -160,8 +411,9 @@ async function saveProjectSettings(event) {
   try {
     state.project = await request(`/api/projects/${state.project.id}`, { method: "PATCH", body: JSON.stringify(body) });
     state.projects = (await request("/api/projects")).projects; populateProjectSettings(); renderAssembly();
+    state.latest_run = await request(`/api/projects/${state.project.id}/overnight-plan`, { method: "POST", body: JSON.stringify({ prevent_sleep: true }) });
     $("#projectSelect").selectedOptions[0].textContent = state.project.name;
-    setStatus($("#settingsStatus"), "Project settings saved."); toast("Project settings saved");
+    setStatus($("#settingsStatus"), "Project brief saved and a fresh plan calculated."); toast("Project brief saved");
   } catch (error) { setStatus($("#settingsStatus"), error.message, true); }
 }
 async function backupDatabase() {
@@ -188,9 +440,31 @@ async function relinkSource(event) {
   } catch (error) { setStatus($("#relinkStatus"), error.message, true); }
 }
 
-$("#projectForm").addEventListener("submit", async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.currentTarget)); try { setStatus($("#projectStatus"), "Inspecting the folder. A broken clip will not stop the rest…"); const payload = await request("/api/projects", { method: "POST", body: JSON.stringify(body) }); state.projects = (await request("/api/projects")).projects; Object.assign(state, payload); await openProject(payload.project.id); } catch (error) { setStatus($("#projectStatus"), error.message, true); } });
+$("#projectForm").addEventListener("submit", async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.currentTarget)); try { setStatus($("#projectStatus"), "Inspecting every nested folder. A broken clip will not stop the rest…"); const payload = await request("/api/projects", { method: "POST", body: JSON.stringify(body) }); state.projects = (await request("/api/projects")).projects; Object.assign(state, payload); await openProject(payload.project.id); } catch (error) { setStatus($("#projectStatus"), error.message, true); } });
+$("#sampleProjectButton").addEventListener("click", async () => { try { $("#sampleProjectButton").disabled = true; setStatus($("#projectStatus"), "Building three small local sample clips…"); const payload = await request("/api/sample-project", { method: "POST", body: "{}" }); state.projects = (await request("/api/projects")).projects; await openProject(payload.project.id); toast("Sample project ready"); } catch (error) { setStatus($("#projectStatus"), error.message, true); } finally { $("#sampleProjectButton").disabled = false; } });
+$("#prepareProxiesButton").addEventListener("click", prepareReviewProxies); $("#reviewOriginalsButton").addEventListener("click", reviewOriginals);
 $("#newProjectButton").addEventListener("click", showWelcome); $("#projectSelect").addEventListener("change", event => openProject(event.target.value));
 $$(".tabs button").forEach(button => button.addEventListener("click", () => switchView(button.dataset.view)));
+$("#projectForm").elements.shot_rhythm.addEventListener("change", event => { $("#customRhythm").hidden = event.target.value !== "custom"; });
+$("#startOvernightButton").addEventListener("click", startOvernight);
+$("#manualReviewButton").addEventListener("click", () => switchView("sources"));
+$("#emptyReviewSources").addEventListener("click", () => switchView("sources"));
+$("#emptyChooseFolder").addEventListener("click", () => { switchView("sources"); $("#addFolderButton").click(); });
+$("#editBriefButton").addEventListener("click", () => { switchView("assemble"); $(".project-settings").open = true; $(".project-settings").scrollIntoView({ behavior: "smooth" }); });
+$("#preventSleep").addEventListener("change", () => rebuildPlan($("#cachePath").value));
+$("#chooseCacheButton").addEventListener("click", async () => { const input = $("#cachePath"); if (!window.pywebview?.api?.choose_folder) { input.focus(); toast("Paste a cache folder path here, then press Enter."); return; } const chosen = await window.pywebview.api.choose_folder(input.value || ""); if (chosen) { input.value = chosen; await rebuildPlan(chosen); } });
+$("#cachePath").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); rebuildPlan(event.currentTarget.value); } });
+$("#pauseRunButton").addEventListener("click", () => runAction("pause"));
+$("#resumeRunButton").addEventListener("click", () => runAction("start"));
+$("#cancelRunButton").addEventListener("click", () => { if (window.confirm("Cancel this preparation run? Completed proposals will remain available.")) runAction("cancel"); });
+$("#reviewReadyButton").addEventListener("click", () => switchView("candidates"));
+$("#moveRunCacheButton").addEventListener("click", moveRunCache);
+$$("[data-candidate-filter]").forEach(button => button.addEventListener("click", () => { state.candidateFilter = button.dataset.candidateFilter; $$("[data-candidate-filter]").forEach(item => item.classList.toggle("is-active", item === button)); renderCandidates(); }));
+$("#candidateMediaMode").addEventListener("click", () => setCandidateMedia(state.candidateMediaMode === "sample" ? "source" : "sample"));
+$("#candidateIn").addEventListener("input", updateCandidateRange); $("#candidateOut").addEventListener("input", updateCandidateRange);
+$("#candidateScrubber").addEventListener("input", event => { if (!state.candidate) return; const sourceTime = Number(event.target.value); $("#candidateVideo").currentTime = state.candidateMediaMode === "source" ? sourceTime : Math.max(0, sourceTime - state.candidate.in_seconds); });
+$("#candidateVideo").addEventListener("timeupdate", event => { if (!state.candidate) return; const generatedIn = Number(state.candidate.generated_in_us) / 1e6; $("#candidateScrubber").value = state.candidateMediaMode === "source" ? event.target.currentTime : generatedIn + event.target.currentTime; });
+$("#saveCandidateButton").addEventListener("click", saveCandidateDecision);
 $$(".filters button").forEach(button => button.addEventListener("click", () => { state.filter = button.dataset.filter; $$(".filters button").forEach(item => item.classList.toggle("is-active", item === button)); renderReview(); }));
 $("#sourceSearch").addEventListener("input", event => { state.search = event.target.value.trim().toLocaleLowerCase(); renderReview(); });
 $("#rescanButton").addEventListener("click", async () => { try { $("#rescanButton").disabled = true; await request(`/api/projects/${state.project.id}/scan`, { method: "POST", body: "{}" }); await openProject(state.project.id); toast("Folder rescanned"); } catch (error) { toast(error.message); } finally { $("#rescanButton").disabled = false; } });
@@ -199,6 +473,7 @@ $("#addFolderForm").addEventListener("submit", async event => { event.preventDef
 $("#setInButton").addEventListener("click", () => { $("#inTime").value = exact($("#sourceVideo").currentTime); updateRangeLabel(); });
 $("#setOutButton").addEventListener("click", () => { $("#outTime").value = exact($("#sourceVideo").currentTime); updateRangeLabel(); });
 $("#playRangeButton").addEventListener("click", playRange); $("#inTime").addEventListener("input", updateRangeLabel); $("#outTime").addEventListener("input", updateRangeLabel);
+$("#sourceMediaModeButton").addEventListener("click", toggleSourceMedia);
 $("#sourceVideo").addEventListener("timeupdate", event => { $("#rangeScrubber").value = event.target.currentTime; if (state.playingRange && event.target.currentTime >= Number($("#outTime").value)) { event.target.pause(); state.playingRange = false; } });
 $("#rangeScrubber").addEventListener("input", event => { $("#sourceVideo").currentTime = Number(event.target.value); }); $("#saveSelectionButton").addEventListener("click", saveSelection);
 $("#archiveSelectionButton").addEventListener("click", archiveSelection);

@@ -95,6 +95,7 @@ def main() -> None:
         print(f"{APP_TITLE} could not start: {exc}", file=sys.stderr)
         raise
     finally:
+        server.application.overnight.shutdown()  # type: ignore[attr-defined]
         server.shutdown()
         server.server_close()
         server_thread.join(timeout=3)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "selects-preeditor"
-version = "0.7.0"
+version = "0.8.0"
 description = "A local-first, LLM-assisted footage pre-editor with reversible decisions."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,12 +17,33 @@ classifiers = [
   "Topic :: Multimedia :: Video",
 ]
 
+[project.optional-dependencies]
+test = [
+  "Pillow>=12.2,<13",
+]
+desktop = [
+  "pywebview>=6.2,<7",
+]
+build = [
+  "py2app>=0.28.10,<0.29",
+  "pywebview>=6.2,<7",
+]
+
+[project.urls]
+Homepage = "https://github.com/czzzry/pyrenees-selects"
+Documentation = "https://github.com/czzzry/pyrenees-selects#readme"
+Issues = "https://github.com/czzzry/pyrenees-selects/issues"
+
 [project.scripts]
 selects = "pyrenees_selects.cli:main"
 selects-app = "pyrenees_selects.preeditor_server:main"
 
 [tool.setuptools]
 packages = ["pyrenees_selects"]
+include-package-data = false
 
 [tool.setuptools.package-data]
-pyrenees_selects = ["static/*.html", "static/*.css", "static/*.js"]
+pyrenees_selects = ["static/*.html", "static/*.css", "static/*.js", "static/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

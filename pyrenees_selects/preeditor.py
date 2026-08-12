@@ -8,17 +8,21 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .media import VIDEO_EXTENSIONS, VideoMetadata, probe_video
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 DECISIONS = {"keep", "maybe", "skip"}
 STORY_ROLES = {"opening", "transition", "peak", "ending"}
 AUDIO_INTENTS = {"undecided", "mute", "preserve", "speech", "background"}
 ORIENTATIONS = {"landscape", "portrait", "undecided"}
+SHOT_RHYTHMS = {"energetic", "balanced", "observational", "custom"}
+CANDIDATE_BREADTHS = {"focused", "generous", "broad"}
+AUDIO_PREFERENCES = {"speech_and_distinctive", "visual", "all"}
 
 
 def utc_now() -> str:
@@ -32,10 +36,15 @@ def new_id(prefix: str) -> str:
 @dataclass(frozen=True)
 class ProjectOptions:
     name: str
-    target_duration: float | None = None
-    orientation: str = "undecided"
+    target_duration: float | None = 120
+    orientation: str = "landscape"
     intent: str = ""
     ideal_clip_duration: float = 8.0
+    shot_rhythm: str = "balanced"
+    shot_min_seconds: float = 6.0
+    shot_max_seconds: float = 9.0
+    candidate_breadth: str = "generous"
+    audio_preference: str = "speech_and_distinctive"
 
 
 @dataclass(frozen=True)
@@ -62,6 +71,12 @@ CREATE TABLE IF NOT EXISTS preeditor_projects (
     orientation TEXT NOT NULL CHECK(orientation IN ('landscape','portrait','undecided')),
     intent TEXT NOT NULL DEFAULT '',
     ideal_clip_duration REAL NOT NULL DEFAULT 8 CHECK(ideal_clip_duration > 0),
+    target_duration_seconds INTEGER CHECK(target_duration_seconds IS NULL OR (target_duration_seconds >= 10 AND target_duration_seconds <= 10800)),
+    shot_rhythm TEXT NOT NULL DEFAULT 'balanced' CHECK(shot_rhythm IN ('energetic','balanced','observational','custom')),
+    shot_min_seconds REAL NOT NULL DEFAULT 6 CHECK(shot_min_seconds >= 1 AND shot_min_seconds <= 60),
+    shot_max_seconds REAL NOT NULL DEFAULT 9 CHECK(shot_max_seconds >= 1 AND shot_max_seconds <= 60),
+    candidate_breadth TEXT NOT NULL DEFAULT 'generous' CHECK(candidate_breadth IN ('focused','generous','broad')),
+    audio_preference TEXT NOT NULL DEFAULT 'speech_and_distinctive' CHECK(audio_preference IN ('speech_and_distinctive','visual','all')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -92,6 +107,7 @@ CREATE TABLE IF NOT EXISTS preeditor_sources (
     size_bytes INTEGER,
     has_audio INTEGER,
     rotation INTEGER NOT NULL DEFAULT 0,
+    is_vfr INTEGER NOT NULL DEFAULT 0 CHECK(is_vfr IN (0,1)),
     status TEXT NOT NULL CHECK(status IN ('ready','offline','error','unsupported')),
     error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -118,6 +134,8 @@ CREATE TABLE IF NOT EXISTS preeditor_selections (
     source_id TEXT NOT NULL REFERENCES preeditor_sources(id) ON DELETE RESTRICT,
     in_seconds REAL NOT NULL CHECK(in_seconds >= 0),
     out_seconds REAL NOT NULL CHECK(out_seconds > in_seconds),
+    in_us INTEGER NOT NULL CHECK(in_us >= 0),
+    out_us INTEGER NOT NULL CHECK(out_us > in_us),
     decision TEXT NOT NULL CHECK(decision IN ('keep','maybe','skip')),
     comment TEXT NOT NULL DEFAULT '',
     story_role TEXT CHECK(story_role IS NULL OR story_role IN ('opening','transition','peak','ending')),
@@ -131,10 +149,19 @@ CREATE TABLE IF NOT EXISTS preeditor_selections (
 );
 CREATE INDEX IF NOT EXISTS preeditor_selections_project_idx
     ON preeditor_selections(project_id,decision,created_at);
+CREATE TABLE IF NOT EXISTS preeditor_selection_revisions (
+    id TEXT PRIMARY KEY,
+    selection_id TEXT NOT NULL REFERENCES preeditor_selections(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL CHECK(revision > 0),
+    snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(selection_id,revision)
+);
 CREATE TABLE IF NOT EXISTS preeditor_selection_markers (
     id TEXT PRIMARY KEY,
     selection_id TEXT NOT NULL REFERENCES preeditor_selections(id) ON DELETE CASCADE,
     source_seconds REAL NOT NULL CHECK(source_seconds >= 0),
+    source_us INTEGER NOT NULL CHECK(source_us >= 0),
     comment TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
@@ -152,6 +179,7 @@ CREATE TABLE IF NOT EXISTS preeditor_sequence_versions (
     version INTEGER NOT NULL CHECK(version > 0),
     parent_version_id TEXT REFERENCES preeditor_sequence_versions(id) ON DELETE SET NULL,
     note TEXT NOT NULL DEFAULT '',
+    orientation TEXT NOT NULL DEFAULT 'landscape' CHECK(orientation IN ('landscape','portrait')),
     created_at TEXT NOT NULL,
     UNIQUE(sequence_id,version)
 );
@@ -159,6 +187,7 @@ CREATE TABLE IF NOT EXISTS preeditor_sequence_items (
     version_id TEXT NOT NULL REFERENCES preeditor_sequence_versions(id) ON DELETE CASCADE,
     position INTEGER NOT NULL CHECK(position > 0),
     selection_id TEXT NOT NULL REFERENCES preeditor_selections(id) ON DELETE RESTRICT,
+    snapshot_json TEXT,
     PRIMARY KEY(version_id,position),
     UNIQUE(version_id,selection_id)
 );
@@ -174,6 +203,73 @@ CREATE TABLE IF NOT EXISTS preeditor_proposals (
     created_at TEXT NOT NULL,
     decided_at TEXT
 );
+CREATE TABLE IF NOT EXISTS preeditor_analysis_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES preeditor_projects(id) ON DELETE CASCADE,
+    algorithm_version INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('planned','running','pausing','paused','cancelling','cancelled','completed','completed_with_warnings','failed','stale')),
+    brief_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    source_snapshot_json TEXT NOT NULL,
+    cache_path TEXT NOT NULL,
+    prevent_sleep INTEGER NOT NULL DEFAULT 0 CHECK(prevent_sleep IN (0,1)),
+    progress_total INTEGER NOT NULL DEFAULT 0,
+    progress_processed INTEGER NOT NULL DEFAULT 0,
+    elapsed_seconds REAL NOT NULL DEFAULT 0,
+    eta_seconds REAL,
+    eta_provenance TEXT NOT NULL DEFAULT 'conservative_baseline',
+    warning TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    updated_at TEXT NOT NULL,
+    ended_at TEXT
+);
+CREATE INDEX IF NOT EXISTS preeditor_analysis_runs_project_idx
+    ON preeditor_analysis_runs(project_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS preeditor_analysis_run_sources (
+    run_id TEXT NOT NULL REFERENCES preeditor_analysis_runs(id) ON DELETE CASCADE,
+    source_id TEXT NOT NULL REFERENCES preeditor_sources(id) ON DELETE RESTRICT,
+    position INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','proxying','analyzing','rendering','completed','failed','skipped','cancelled')),
+    stage TEXT NOT NULL DEFAULT 'pending',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    processed_tasks INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    started_at TEXT,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    PRIMARY KEY(run_id,source_id),
+    UNIQUE(run_id,position)
+);
+CREATE TABLE IF NOT EXISTS preeditor_generated_candidates (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES preeditor_analysis_runs(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES preeditor_projects(id) ON DELETE CASCADE,
+    source_id TEXT NOT NULL REFERENCES preeditor_sources(id) ON DELETE RESTRICT,
+    source_fingerprint TEXT NOT NULL,
+    rank INTEGER,
+    in_us INTEGER NOT NULL CHECK(in_us >= 0),
+    out_us INTEGER NOT NULL CHECK(out_us > in_us),
+    selected_in_us INTEGER,
+    selected_out_us INTEGER,
+    score REAL NOT NULL,
+    score_components_json TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    sample_path TEXT,
+    artifact_json TEXT NOT NULL DEFAULT '{}',
+    review_state TEXT NOT NULL DEFAULT 'unreviewed' CHECK(review_state IN ('unreviewed','kept','maybe','skipped')),
+    linked_selection_id TEXT REFERENCES preeditor_selections(id) ON DELETE SET NULL,
+    comment TEXT NOT NULL DEFAULT '',
+    story_role TEXT CHECK(story_role IS NULL OR story_role IN ('opening','transition','peak','ending')),
+    audio_intent TEXT NOT NULL DEFAULT 'undecided' CHECK(audio_intent IN ('undecided','mute','preserve','speech','background')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(run_id,source_id,in_us,out_us)
+);
+CREATE INDEX IF NOT EXISTS preeditor_candidates_run_idx
+    ON preeditor_generated_candidates(run_id,rank,score DESC);
 """
 
 
@@ -190,23 +286,161 @@ class PreEditor:
         self.database.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             connection.executescript(SCHEMA)
+            row = connection.execute("SELECT version FROM preeditor_schema LIMIT 1").fetchone()
+            previous_version = int(row["version"]) if row else None
+            if previous_version is not None and previous_version < SCHEMA_VERSION:
+                self._backup_before_migration(connection, previous_version)
             project_columns = {
                 str(row["name"]) for row in connection.execute("PRAGMA table_info(preeditor_projects)")
             }
-            if "ideal_clip_duration" not in project_columns:
+            project_migrations = {
+                "ideal_clip_duration": "REAL NOT NULL DEFAULT 8",
+                "target_duration_seconds": "INTEGER",
+                "shot_rhythm": "TEXT NOT NULL DEFAULT 'balanced'",
+                "shot_min_seconds": "REAL NOT NULL DEFAULT 6",
+                "shot_max_seconds": "REAL NOT NULL DEFAULT 9",
+                "candidate_breadth": "TEXT NOT NULL DEFAULT 'generous'",
+                "audio_preference": "TEXT NOT NULL DEFAULT 'speech_and_distinctive'",
+            }
+            added_project_columns: set[str] = set()
+            for column, declaration in project_migrations.items():
+                if column not in project_columns:
+                    connection.execute(f"ALTER TABLE preeditor_projects ADD COLUMN {column} {declaration}")
+                    added_project_columns.add(column)
+            connection.execute(
+                """UPDATE preeditor_projects
+                   SET target_duration_seconds=CAST(ROUND(target_duration) AS INTEGER)
+                   WHERE target_duration_seconds IS NULL AND target_duration IS NOT NULL"""
+            )
+            if "shot_rhythm" in added_project_columns:
                 connection.execute(
-                    "ALTER TABLE preeditor_projects ADD COLUMN ideal_clip_duration REAL NOT NULL DEFAULT 8"
+                    """UPDATE preeditor_projects
+                       SET shot_rhythm=CASE
+                             WHEN ideal_clip_duration < 5.75 THEN 'energetic'
+                             WHEN ideal_clip_duration > 10.25 THEN 'observational'
+                             ELSE 'balanced' END,
+                           shot_min_seconds=CASE
+                             WHEN ideal_clip_duration < 5.75 THEN 3
+                             WHEN ideal_clip_duration > 10.25 THEN 10
+                             ELSE 6 END,
+                           shot_max_seconds=CASE
+                             WHEN ideal_clip_duration < 5.75 THEN 5
+                             WHEN ideal_clip_duration > 10.25 THEN 16
+                             ELSE 9 END"""
                 )
-            row = connection.execute("SELECT version FROM preeditor_schema LIMIT 1").fetchone()
+            selection_columns = {
+                str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_selections)")
+            }
+            if "archived_at" not in selection_columns:
+                connection.execute("ALTER TABLE preeditor_selections ADD COLUMN archived_at TEXT")
+            if "in_us" not in selection_columns:
+                connection.execute("ALTER TABLE preeditor_selections ADD COLUMN in_us INTEGER")
+            if "out_us" not in selection_columns:
+                connection.execute("ALTER TABLE preeditor_selections ADD COLUMN out_us INTEGER")
+            connection.execute(
+                """UPDATE preeditor_selections
+                   SET in_us=CAST(ROUND(in_seconds*1000000) AS INTEGER),
+                       out_us=CAST(ROUND(out_seconds*1000000) AS INTEGER)
+                   WHERE in_us IS NULL OR out_us IS NULL"""
+            )
+            marker_columns = {
+                str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_selection_markers)")
+            }
+            if "source_us" not in marker_columns:
+                connection.execute("ALTER TABLE preeditor_selection_markers ADD COLUMN source_us INTEGER")
+            connection.execute(
+                """UPDATE preeditor_selection_markers
+                   SET source_us=CAST(ROUND(source_seconds*1000000) AS INTEGER)
+                   WHERE source_us IS NULL"""
+            )
+            sequence_version_columns = {
+                str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_sequence_versions)")
+            }
+            if "orientation" not in sequence_version_columns:
+                connection.execute("ALTER TABLE preeditor_sequence_versions ADD COLUMN orientation TEXT")
+            connection.execute(
+                """UPDATE preeditor_sequence_versions
+                   SET orientation=COALESCE(
+                       (SELECT CASE WHEN p.orientation='portrait' THEN 'portrait' ELSE 'landscape' END
+                          FROM preeditor_sequences s JOIN preeditor_projects p ON p.id=s.project_id
+                         WHERE s.id=preeditor_sequence_versions.sequence_id),
+                       'landscape'
+                   ) WHERE orientation IS NULL"""
+            )
+            sequence_item_columns = {
+                str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_sequence_items)")
+            }
+            if "snapshot_json" not in sequence_item_columns:
+                connection.execute("ALTER TABLE preeditor_sequence_items ADD COLUMN snapshot_json TEXT")
+            source_columns = {
+                str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_sources)")
+            }
+            if "is_vfr" not in source_columns:
+                connection.execute("ALTER TABLE preeditor_sources ADD COLUMN is_vfr INTEGER NOT NULL DEFAULT 0")
+            if previous_version is not None and previous_version < SCHEMA_VERSION:
+                # The fingerprint algorithm and VFR fact became stricter in v4.
+                # Re-probe once during the backed-up migration so unchanged
+                # legacy sources remain usable without a manual rescan.
+                for source_row in connection.execute(
+                    "SELECT * FROM preeditor_sources WHERE status='ready'"
+                ).fetchall():
+                    path = Path(str(source_row["current_path"]))
+                    if not path.is_file():
+                        connection.execute(
+                            "UPDATE preeditor_sources SET status='offline',error=?,updated_at=? WHERE id=?",
+                            ("Source was offline during schema migration.", utc_now(), source_row["id"]),
+                        )
+                        continue
+                    try:
+                        metadata = probe_video(path)
+                        fingerprint = self._fingerprint(metadata)
+                    except Exception as exc:
+                        connection.execute(
+                            "UPDATE preeditor_sources SET status='error',error=?,updated_at=? WHERE id=?",
+                            (f"Migration could not inspect this source: {exc}"[:1_000], utc_now(), source_row["id"]),
+                        )
+                        continue
+                    connection.execute(
+                        """UPDATE preeditor_sources SET fingerprint=?,filename=?,captured_at=?,duration=?,
+                                  width=?,height=?,fps=?,codec=?,size_bytes=?,has_audio=?,rotation=?,is_vfr=?,
+                                  error='',updated_at=? WHERE id=?""",
+                        (
+                            fingerprint, metadata.filename, metadata.captured_at, metadata.duration,
+                            metadata.width, metadata.height, metadata.fps, metadata.codec,
+                            metadata.size_bytes, int(metadata.has_audio), metadata.rotation,
+                            int(metadata.is_vfr), utc_now(), source_row["id"],
+                        ),
+                    )
+                legacy_items = connection.execute(
+                    """SELECT i.version_id,i.position,x.*,m.filename,m.current_path,
+                              m.fingerprint source_fingerprint,m.duration source_duration,
+                              m.width,m.height,m.fps,m.codec,m.has_audio,m.rotation,m.is_vfr,
+                              m.status source_status,r.label source_label
+                         FROM preeditor_sequence_items i
+                         JOIN preeditor_selections x ON x.id=i.selection_id
+                         JOIN preeditor_sources m ON m.id=x.source_id
+                         JOIN preeditor_source_roots r ON r.id=m.root_id
+                        WHERE i.snapshot_json IS NULL"""
+                ).fetchall()
+                for item in legacy_items:
+                    snapshot = dict(item)
+                    version_id = snapshot.pop("version_id")
+                    position = snapshot.pop("position")
+                    connection.execute(
+                        """UPDATE preeditor_sequence_items SET snapshot_json=?
+                           WHERE version_id=? AND position=?""",
+                        (json.dumps(snapshot, sort_keys=True), version_id, position),
+                    )
+            candidate_columns = {
+                str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_generated_candidates)")
+            }
+            if "selected_in_us" not in candidate_columns:
+                connection.execute("ALTER TABLE preeditor_generated_candidates ADD COLUMN selected_in_us INTEGER")
+            if "selected_out_us" not in candidate_columns:
+                connection.execute("ALTER TABLE preeditor_generated_candidates ADD COLUMN selected_out_us INTEGER")
             if row is None:
                 connection.execute("INSERT INTO preeditor_schema(version) VALUES(?)", (SCHEMA_VERSION,))
-            elif int(row["version"]) == 1:
-                self._backup_before_migration(connection, 1)
-                selection_columns = {
-                    str(item["name"]) for item in connection.execute("PRAGMA table_info(preeditor_selections)")
-                }
-                if "archived_at" not in selection_columns:
-                    connection.execute("ALTER TABLE preeditor_selections ADD COLUMN archived_at TEXT")
+            elif int(row["version"]) in {1, 2, 3}:
                 connection.execute("UPDATE preeditor_schema SET version=?", (SCHEMA_VERSION,))
             elif int(row["version"]) != SCHEMA_VERSION:
                 raise RuntimeError(
@@ -250,22 +484,17 @@ class PreEditor:
         return target
 
     def create_project(self, options: ProjectOptions) -> dict[str, Any]:
+        self._validate_project_options(options)
         name = options.name.strip()
-        if not name:
-            raise ValueError("Project name is required.")
-        if options.orientation not in ORIENTATIONS:
-            raise ValueError("Orientation must be landscape, portrait, or undecided.")
-        if options.target_duration is not None and options.target_duration <= 0:
-            raise ValueError("Target duration must be positive.")
-        if options.ideal_clip_duration <= 0:
-            raise ValueError("Ideal clip duration must be positive.")
         now = utc_now()
         project_id = new_id("project")
         with self.connection() as connection:
             connection.execute(
                 """INSERT INTO preeditor_projects(
-                       id,name,target_duration,orientation,intent,ideal_clip_duration,created_at,updated_at
-                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                       id,name,target_duration,orientation,intent,ideal_clip_duration,target_duration_seconds,
+                       shot_rhythm,shot_min_seconds,shot_max_seconds,candidate_breadth,audio_preference,
+                       created_at,updated_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     project_id,
                     name[:120],
@@ -273,11 +502,40 @@ class PreEditor:
                     options.orientation,
                     options.intent.strip()[:8_000],
                     options.ideal_clip_duration,
+                    int(options.target_duration) if options.target_duration is not None else None,
+                    options.shot_rhythm,
+                    options.shot_min_seconds,
+                    options.shot_max_seconds,
+                    options.candidate_breadth,
+                    options.audio_preference,
                     now,
                     now,
                 ),
             )
         return self.project(project_id) or {}
+
+    @staticmethod
+    def _validate_project_options(options: ProjectOptions) -> None:
+        if not options.name.strip():
+            raise ValueError("Project name is required.")
+        if options.orientation not in ORIENTATIONS:
+            raise ValueError("Orientation must be landscape, portrait, or undecided.")
+        if options.target_duration is not None and (
+            not float(options.target_duration).is_integer() or not 10 <= options.target_duration <= 10_800
+        ):
+            raise ValueError("Target duration must be a whole number between 10 seconds and 3 hours.")
+        if options.ideal_clip_duration <= 0:
+            raise ValueError("Ideal clip duration must be positive.")
+        if options.shot_rhythm not in SHOT_RHYTHMS:
+            raise ValueError("Shot rhythm must be energetic, balanced, observational, or custom.")
+        if not 1 <= options.shot_min_seconds <= 60 or not 1 <= options.shot_max_seconds <= 60:
+            raise ValueError("Shot lengths must be between 1 and 60 seconds.")
+        if options.shot_min_seconds > options.shot_max_seconds:
+            raise ValueError("Minimum shot length cannot exceed maximum shot length.")
+        if options.candidate_breadth not in CANDIDATE_BREADTHS:
+            raise ValueError("Candidate breadth must be focused, generous, or broad.")
+        if options.audio_preference not in AUDIO_PREFERENCES:
+            raise ValueError("Audio preference must be speech_and_distinctive, visual, or all.")
 
     def project(self, project_id: str) -> dict[str, Any] | None:
         with self.connection() as connection:
@@ -297,35 +555,42 @@ class PreEditor:
         existing = self.project(project_id)
         if not existing:
             raise KeyError(project_id)
-        allowed = {"name", "target_duration", "orientation", "intent", "ideal_clip_duration"}
+        allowed = {
+            "name", "target_duration", "target_duration_seconds", "orientation", "intent",
+            "ideal_clip_duration", "shot_rhythm", "shot_min_seconds", "shot_max_seconds",
+            "candidate_breadth", "audio_preference",
+        }
         unknown = set(changes) - allowed
         if unknown:
             raise ValueError(f"Unsupported project changes: {sorted(unknown)}")
         options = ProjectOptions(
             name=str(changes.get("name", existing["name"])),
             target_duration=(
-                None if changes.get("target_duration", existing["target_duration"]) in {None, ""}
-                else float(changes.get("target_duration", existing["target_duration"]))
+                None
+                if changes.get("target_duration_seconds", changes.get("target_duration", existing["target_duration_seconds"])) in {None, ""}
+                else float(changes.get("target_duration_seconds", changes.get("target_duration", existing["target_duration_seconds"])))
             ),
             orientation=str(changes.get("orientation", existing["orientation"])),
             intent=str(changes.get("intent", existing["intent"])),
             ideal_clip_duration=float(changes.get("ideal_clip_duration", existing["ideal_clip_duration"])),
+            shot_rhythm=str(changes.get("shot_rhythm", existing["shot_rhythm"])),
+            shot_min_seconds=float(changes.get("shot_min_seconds", existing["shot_min_seconds"])),
+            shot_max_seconds=float(changes.get("shot_max_seconds", existing["shot_max_seconds"])),
+            candidate_breadth=str(changes.get("candidate_breadth", existing["candidate_breadth"])),
+            audio_preference=str(changes.get("audio_preference", existing["audio_preference"])),
         )
-        if not options.name.strip():
-            raise ValueError("Project name is required.")
-        if options.orientation not in ORIENTATIONS:
-            raise ValueError("Orientation must be landscape, portrait, or undecided.")
-        if options.target_duration is not None and options.target_duration <= 0:
-            raise ValueError("Target duration must be positive.")
-        if options.ideal_clip_duration <= 0:
-            raise ValueError("Ideal clip duration must be positive.")
+        self._validate_project_options(options)
         now = utc_now()
         with self.connection() as connection:
             connection.execute(
                 """UPDATE preeditor_projects SET name=?,target_duration=?,orientation=?,intent=?,
-                          ideal_clip_duration=?,updated_at=? WHERE id=?""",
+                          ideal_clip_duration=?,target_duration_seconds=?,shot_rhythm=?,shot_min_seconds=?,
+                          shot_max_seconds=?,candidate_breadth=?,audio_preference=?,updated_at=? WHERE id=?""",
                 (options.name.strip()[:120], options.target_duration, options.orientation,
-                 options.intent.strip()[:8_000], options.ideal_clip_duration, now, project_id),
+                 options.intent.strip()[:8_000], options.ideal_clip_duration,
+                 int(options.target_duration) if options.target_duration is not None else None,
+                 options.shot_rhythm, options.shot_min_seconds, options.shot_max_seconds,
+                 options.candidate_breadth, options.audio_preference, now, project_id),
             )
         return self.project(project_id) or {}
 
@@ -382,23 +647,46 @@ class PreEditor:
 
     @staticmethod
     def _paths_for_root(root: Mapping[str, Any]) -> list[Path]:
-        base = Path(str(root["path"]))
+        base = Path(str(root["path"])).resolve(strict=True)
         iterator = base.rglob("*") if bool(root["recursive"]) else base.iterdir()
-        return sorted(
-            (path for path in iterator if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS),
-            key=lambda path: str(path.relative_to(base)).lower(),
-        )
+        contained: list[Path] = []
+        for path in iterator:
+            if not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            try:
+                path.resolve(strict=True).relative_to(base)
+            except (OSError, ValueError):
+                # A footage root grants access only to files actually inside it;
+                # a symlink cannot turn a registered folder into arbitrary-file access.
+                continue
+            contained.append(path)
+        return sorted(contained, key=lambda path: str(path.relative_to(base)).lower())
+
+    def unsupported_file_count(self, project_id: str) -> int:
+        count = 0
+        for root in self.source_roots(project_id):
+            try:
+                base = Path(str(root["path"])).resolve(strict=True)
+            except OSError:
+                continue
+            iterator = base.rglob("*") if bool(root["recursive"]) else base.iterdir()
+            for path in iterator:
+                if not path.is_file() or path.suffix.lower() in VIDEO_EXTENSIONS:
+                    continue
+                try:
+                    path.resolve(strict=True).relative_to(base)
+                except (OSError, ValueError):
+                    continue
+                count += 1
+        return count
 
     @staticmethod
     def _fingerprint(metadata: VideoMetadata) -> str:
         digest = hashlib.sha256()
-        digest.update(f"{metadata.size_bytes}|{metadata.duration:.3f}".encode("utf-8"))
         path = Path(metadata.path)
         with path.open("rb") as stream:
-            digest.update(stream.read(65_536))
-            if metadata.size_bytes > 65_536:
-                stream.seek(max(0, metadata.size_bytes - 65_536))
-                digest.update(stream.read(65_536))
+            while chunk := stream.read(4 * 1024 * 1024):
+                digest.update(chunk)
         return digest.hexdigest()
 
     def scan(
@@ -449,11 +737,11 @@ class PreEditor:
                             connection.execute(
                                 """UPDATE preeditor_sources SET root_id=?,relative_path=?,current_path=?,
                                        filename=?,captured_at=?,duration=?,width=?,height=?,fps=?,codec=?,size_bytes=?,
-                                       has_audio=?,rotation=?,status='ready',error='',updated_at=? WHERE id=?""",
+                                       has_audio=?,rotation=?,is_vfr=?,status='ready',error='',updated_at=? WHERE id=?""",
                                 (
                                     root["id"], relative, metadata.path, metadata.filename, metadata.captured_at,
                                     metadata.duration, metadata.width, metadata.height, metadata.fps, metadata.codec,
-                                    metadata.size_bytes, int(metadata.has_audio), metadata.rotation, now, moved["id"],
+                                    metadata.size_bytes, int(metadata.has_audio), metadata.rotation, int(metadata.is_vfr), now, moved["id"],
                                 ),
                             )
                             ready += 1
@@ -464,8 +752,8 @@ class PreEditor:
                             """INSERT INTO preeditor_sources(
                                    id,project_id,root_id,relative_path,current_path,fingerprint,
                                    filename,captured_at,duration,width,height,fps,codec,size_bytes,
-                                   has_audio,rotation,status,error,created_at,updated_at
-                               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ready','',?,?)
+                                   has_audio,rotation,is_vfr,status,error,created_at,updated_at
+                               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ready','',?,?)
                                ON CONFLICT(root_id,relative_path) DO UPDATE SET
                                  current_path=excluded.current_path,
                                  fingerprint=excluded.fingerprint,
@@ -479,6 +767,7 @@ class PreEditor:
                                  size_bytes=excluded.size_bytes,
                                  has_audio=excluded.has_audio,
                                  rotation=excluded.rotation,
+                                 is_vfr=excluded.is_vfr,
                                  status='ready',error='',updated_at=excluded.updated_at""",
                             (
                                 source_id,
@@ -497,6 +786,7 @@ class PreEditor:
                                 metadata.size_bytes,
                                 int(metadata.has_audio),
                                 metadata.rotation,
+                                int(metadata.is_vfr),
                                 created_at,
                                 now,
                             ),
@@ -570,6 +860,19 @@ class PreEditor:
             ).fetchone()
         return dict(row) if row else None
 
+    def assert_source_unchanged(self, source_id: str, expected_fingerprint: str | None = None) -> dict[str, Any]:
+        source = self.source(source_id)
+        if not source or source["status"] != "ready":
+            raise ValueError("The source is offline or unreadable. Rescan or relink it before continuing.")
+        if expected_fingerprint and source["fingerprint"] != expected_fingerprint:
+            raise ValueError(f"{source['filename']} changed after this editorial snapshot was saved.")
+        current_path = Path(str(source["current_path"])).expanduser().resolve(strict=True)
+        metadata = probe_video(current_path)
+        actual = self._fingerprint(metadata)
+        if actual != source["fingerprint"]:
+            raise ValueError(f"{source['filename']} changed on disk. Rescan before preparing or exporting.")
+        return source
+
     def relink_source(self, source_id: str, path: Path, *, probe: Callable[[Path], VideoMetadata] = probe_video) -> dict[str, Any]:
         source = self.source(source_id)
         if not source:
@@ -584,7 +887,7 @@ class PreEditor:
         with self.connection() as connection:
             connection.execute(
                 """UPDATE preeditor_sources SET current_path=?,fingerprint=?,filename=?,captured_at=?,
-                       duration=?,width=?,height=?,fps=?,codec=?,size_bytes=?,has_audio=?,rotation=?,status='ready',error='',updated_at=?
+                       duration=?,width=?,height=?,fps=?,codec=?,size_bytes=?,has_audio=?,rotation=?,is_vfr=?,status='ready',error='',updated_at=?
                    WHERE id=?""",
                 (
                     metadata.path,
@@ -599,6 +902,7 @@ class PreEditor:
                     metadata.size_bytes,
                     int(metadata.has_audio),
                     metadata.rotation,
+                    int(metadata.is_vfr),
                     now,
                     source_id,
                 ),
@@ -609,31 +913,66 @@ class PreEditor:
         source = self.source(draft.source_id)
         if not source or source["project_id"] != project_id:
             raise KeyError(draft.source_id)
-        self._validate_selection(source, draft)
+        in_us, out_us = self.canonical_range(
+            source, round(draft.in_seconds * 1_000_000), round(draft.out_seconds * 1_000_000)
+        )
+        canonical = SelectionDraft(
+            draft.source_id, in_us / 1_000_000, out_us / 1_000_000, draft.decision,
+            draft.comment, draft.story_role, draft.audio_intent, draft.origin,
+        )
+        self._validate_selection(source, canonical)
         now = utc_now()
         selection_id = new_id("selection")
         with self.connection() as connection:
             connection.execute(
                 """INSERT INTO preeditor_selections(
-                       id,project_id,source_id,in_seconds,out_seconds,decision,comment,
+                       id,project_id,source_id,in_seconds,out_seconds,in_us,out_us,decision,comment,
                        story_role,audio_intent,origin,created_at,updated_at
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     selection_id,
                     project_id,
                     draft.source_id,
-                    draft.in_seconds,
-                    draft.out_seconds,
-                    draft.decision,
-                    draft.comment.strip()[:8_000],
-                    draft.story_role,
-                    draft.audio_intent,
-                    draft.origin[:80],
+                    canonical.in_seconds,
+                    canonical.out_seconds,
+                    in_us,
+                    out_us,
+                    canonical.decision,
+                    canonical.comment.strip()[:8_000],
+                    canonical.story_role,
+                    canonical.audio_intent,
+                    canonical.origin[:80],
                     now,
                     now,
                 ),
             )
+            self._record_selection_revision(connection, selection_id, now)
         return self.selection(selection_id) or {}
+
+    @staticmethod
+    def _record_selection_revision(connection: sqlite3.Connection, selection_id: str, created_at: str) -> None:
+        row = connection.execute("SELECT * FROM preeditor_selections WHERE id=?", (selection_id,)).fetchone()
+        if not row:
+            raise KeyError(selection_id)
+        revision = int(connection.execute(
+            "SELECT COALESCE(MAX(revision),0)+1 next_revision FROM preeditor_selection_revisions WHERE selection_id=?",
+            (selection_id,),
+        ).fetchone()["next_revision"])
+        connection.execute(
+            """INSERT INTO preeditor_selection_revisions(id,selection_id,revision,snapshot_json,created_at)
+               VALUES(?,?,?,?,?)""",
+            (new_id("selection-revision"), selection_id, revision, json.dumps(dict(row), sort_keys=True), created_at),
+        )
+
+    def selection_revisions(self, selection_id: str) -> list[dict[str, Any]]:
+        if not self.selection(selection_id):
+            raise KeyError(selection_id)
+        with self.connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM preeditor_selection_revisions WHERE selection_id=? ORDER BY revision",
+                (selection_id,),
+            ).fetchall()
+        return [{**dict(row), "snapshot": json.loads(str(row["snapshot_json"]))} for row in rows]
 
     @staticmethod
     def _validate_selection(source: Mapping[str, Any], draft: SelectionDraft) -> None:
@@ -648,6 +987,26 @@ class PreEditor:
         duration = source.get("duration")
         if duration is None or draft.out_seconds > float(duration) + 0.001:
             raise ValueError("Selection extends beyond the source duration.")
+
+    @staticmethod
+    def canonical_range(source: Mapping[str, Any], in_us: int, out_us: int) -> tuple[int, int]:
+        """Clamp one inclusive-In/exclusive-Out range to canonical source time."""
+        duration_us = max(1, round(float(source.get("duration") or source.get("source_duration") or 0) * 1_000_000))
+        start = max(0, int(in_us))
+        end = min(duration_us, int(out_us))
+        fps = float(source.get("fps") or 0)
+        if not bool(source.get("is_vfr")) and fps > 0:
+            rate = Fraction(str(fps)).limit_denominator(100_000)
+            denominator = 1_000_000 * rate.denominator
+            start_frame = (start * rate.numerator) // denominator
+            end_frame = (end * rate.numerator + denominator - 1) // denominator
+            start = max(0, round(start_frame * denominator / rate.numerator))
+            end = min(duration_us, round(end_frame * denominator / rate.numerator))
+            if end <= start:
+                end = min(duration_us, round(start + denominator / rate.numerator))
+        if start >= duration_us or end <= start:
+            raise ValueError("A selection requires at least one frame inside the source duration.")
+        return start, end
 
     def selection(self, selection_id: str) -> dict[str, Any] | None:
         with self.connection() as connection:
@@ -665,7 +1024,17 @@ class PreEditor:
     @staticmethod
     def _selection_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         payload = dict(row)
-        payload["duration"] = float(payload["out_seconds"]) - float(payload["in_seconds"])
+        in_us = payload.get("in_us")
+        out_us = payload.get("out_us")
+        if in_us is None or out_us is None:
+            in_us = round(float(payload["in_seconds"]) * 1_000_000)
+            out_us = round(float(payload["out_seconds"]) * 1_000_000)
+        payload["in_us"] = int(in_us)
+        payload["out_us"] = int(out_us)
+        payload["in_seconds"] = int(in_us) / 1_000_000
+        payload["out_seconds"] = int(out_us) / 1_000_000
+        payload["duration_us"] = int(out_us) - int(in_us)
+        payload["duration"] = payload["duration_us"] / 1_000_000
         payload["treatment"] = json.loads(str(payload.pop("treatment_json")))
         return payload
 
@@ -697,29 +1066,58 @@ class PreEditor:
                 "UPDATE preeditor_selections SET archived_at=?,updated_at=? WHERE id=?",
                 (archived_at, archived_at, selection_id),
             )
+        self._revise_sequences_containing_selection(selection_id, remove=True)
         return self.selection(selection_id) or {}
+
+    def _revise_sequences_containing_selection(self, selection_id: str, *, remove: bool = False) -> None:
+        """Freeze a new version whenever a current sequence dependency changes."""
+        with self.connection() as connection:
+            affected = connection.execute(
+                """SELECT v.sequence_id,v.id version_id
+                     FROM preeditor_sequence_versions v
+                     JOIN preeditor_sequence_items i ON i.version_id=v.id
+                    WHERE i.selection_id=?
+                      AND v.version=(SELECT MAX(v2.version) FROM preeditor_sequence_versions v2
+                                      WHERE v2.sequence_id=v.sequence_id)""",
+                (selection_id,),
+            ).fetchall()
+            versions = []
+            for row in affected:
+                ids = [str(item["selection_id"]) for item in connection.execute(
+                    "SELECT selection_id FROM preeditor_sequence_items WHERE version_id=? ORDER BY position",
+                    (row["version_id"],),
+                ).fetchall()]
+                versions.append((str(row["sequence_id"]), [item for item in ids if not (remove and item == selection_id)]))
+        for sequence_id, ids in versions:
+            self.revise_sequence(
+                sequence_id, ids,
+                note="Selection removed" if remove else "Selection revision",
+            )
 
     def update_selection(self, selection_id: str, **changes: Any) -> dict[str, Any]:
         existing = self.selection(selection_id)
         if not existing:
             raise KeyError(selection_id)
-        allowed = {"in_seconds", "out_seconds", "decision", "comment", "story_role", "audio_intent", "treatment"}
+        allowed = {"in_us", "out_us", "in_seconds", "out_seconds", "decision", "comment", "story_role", "audio_intent", "treatment"}
         unknown = set(changes) - allowed
         if unknown:
             raise ValueError(f"Unsupported selection changes: {sorted(unknown)}")
+        requested_in_us = int(changes["in_us"]) if "in_us" in changes else round(float(changes.get("in_seconds", existing["in_seconds"])) * 1_000_000)
+        requested_out_us = int(changes["out_us"]) if "out_us" in changes else round(float(changes.get("out_seconds", existing["out_seconds"])) * 1_000_000)
+        source = self.source(str(existing["source_id"]))
+        if not source:
+            raise KeyError(existing["source_id"])
+        in_us, out_us = self.canonical_range(source, requested_in_us, requested_out_us)
         draft = SelectionDraft(
             source_id=str(existing["source_id"]),
-            in_seconds=float(changes.get("in_seconds", existing["in_seconds"])),
-            out_seconds=float(changes.get("out_seconds", existing["out_seconds"])),
+            in_seconds=in_us / 1_000_000,
+            out_seconds=out_us / 1_000_000,
             decision=str(changes.get("decision", existing["decision"])),
             comment=str(changes.get("comment", existing["comment"])),
             story_role=changes.get("story_role", existing["story_role"]),
             audio_intent=str(changes.get("audio_intent", existing["audio_intent"])),
             origin=str(existing["origin"]),
         )
-        source = self.source(draft.source_id)
-        if not source:
-            raise KeyError(draft.source_id)
         self._validate_selection(source, draft)
         treatment = changes.get("treatment", existing["treatment"])
         if not isinstance(treatment, Mapping):
@@ -727,11 +1125,13 @@ class PreEditor:
         now = utc_now()
         with self.connection() as connection:
             connection.execute(
-                """UPDATE preeditor_selections SET in_seconds=?,out_seconds=?,decision=?,comment=?,
+                """UPDATE preeditor_selections SET in_seconds=?,out_seconds=?,in_us=?,out_us=?,decision=?,comment=?,
                        story_role=?,audio_intent=?,treatment_json=?,updated_at=? WHERE id=?""",
                 (
                     draft.in_seconds,
                     draft.out_seconds,
+                    in_us,
+                    out_us,
                     draft.decision,
                     draft.comment.strip()[:8_000],
                     draft.story_role,
@@ -741,6 +1141,8 @@ class PreEditor:
                     selection_id,
                 ),
             )
+            self._record_selection_revision(connection, selection_id, now)
+        self._revise_sequences_containing_selection(selection_id)
         return self.selection(selection_id) or {}
 
     def add_marker(self, selection_id: str, source_seconds: float, comment: str) -> dict[str, Any]:
@@ -754,17 +1156,19 @@ class PreEditor:
             raise ValueError("Marker comment is required.")
         marker_id = new_id("marker")
         created_at = utc_now()
+        source_us = round(source_seconds * 1_000_000)
         with self.connection() as connection:
             connection.execute(
                 """INSERT INTO preeditor_selection_markers(
-                       id,selection_id,source_seconds,comment,created_at
-                   ) VALUES(?,?,?,?,?)""",
-                (marker_id, selection_id, source_seconds, clean[:4_000], created_at),
+                       id,selection_id,source_seconds,source_us,comment,created_at
+                   ) VALUES(?,?,?,?,?,?)""",
+                (marker_id, selection_id, source_seconds, source_us, clean[:4_000], created_at),
             )
         return {
             "id": marker_id,
             "selection_id": selection_id,
             "source_seconds": source_seconds,
+            "source_us": source_us,
             "comment": clean[:4_000],
             "created_at": created_at,
         }
@@ -822,12 +1226,20 @@ class PreEditor:
             if selection_ids:
                 placeholders = ",".join("?" for _ in selection_ids)
                 rows = connection.execute(
-                    f"""SELECT id FROM preeditor_selections
-                         WHERE project_id=? AND id IN ({placeholders})""",
+                    f"""SELECT x.*,m.filename,m.current_path,m.fingerprint source_fingerprint,
+                                m.duration source_duration,m.width,m.height,m.fps,m.codec,m.has_audio,
+                                m.rotation,m.is_vfr,m.status source_status,r.label source_label
+                         FROM preeditor_selections x
+                         JOIN preeditor_sources m ON m.id=x.source_id
+                         JOIN preeditor_source_roots r ON r.id=m.root_id
+                         WHERE x.project_id=? AND x.id IN ({placeholders})""",
                     (sequence["project_id"], *selection_ids),
                 ).fetchall()
                 if len(rows) != len(selection_ids):
                     raise ValueError("Every sequence item must be a selection from this project.")
+                snapshots = {str(row["id"]): dict(row) for row in rows}
+            else:
+                snapshots = {}
             previous = connection.execute(
                 """SELECT * FROM preeditor_sequence_versions
                    WHERE sequence_id=? ORDER BY version DESC LIMIT 1""",
@@ -836,23 +1248,36 @@ class PreEditor:
             version_number = int(previous["version"]) + 1 if previous else 1
             version_id = new_id("version")
             now = utc_now()
+            project_orientation = connection.execute(
+                "SELECT orientation FROM preeditor_projects WHERE id=?", (sequence["project_id"],)
+            ).fetchone()["orientation"]
+            orientation = "portrait" if project_orientation == "portrait" else "landscape"
             connection.execute(
                 """INSERT INTO preeditor_sequence_versions(
-                       id,sequence_id,version,parent_version_id,note,created_at
-                   ) VALUES(?,?,?,?,?,?)""",
+                       id,sequence_id,version,parent_version_id,note,orientation,created_at
+                   ) VALUES(?,?,?,?,?,?,?)""",
                 (
                     version_id,
                     sequence_id,
                     version_number,
                     previous["id"] if previous else None,
                     note.strip()[:2_000],
+                    orientation,
                     now,
                 ),
             )
             connection.executemany(
-                """INSERT INTO preeditor_sequence_items(version_id,position,selection_id)
-                   VALUES(?,?,?)""",
-                [(version_id, position, selection_id) for position, selection_id in enumerate(selection_ids, 1)],
+                """INSERT INTO preeditor_sequence_items(version_id,position,selection_id,snapshot_json)
+                   VALUES(?,?,?,?)""",
+                [
+                    (
+                        version_id,
+                        position,
+                        selection_id,
+                        json.dumps(snapshots[selection_id], sort_keys=True),
+                    )
+                    for position, selection_id in enumerate(selection_ids, 1)
+                ],
             )
             connection.execute(
                 "UPDATE preeditor_sequences SET updated_at=? WHERE id=?", (now, sequence_id)
@@ -869,9 +1294,13 @@ class PreEditor:
             ).fetchone()
             if not version:
                 raise KeyError(version_id)
-            rows = connection.execute(
-                """SELECT i.position,x.*,m.filename,m.current_path,m.duration source_duration,
-                          m.width,m.height,m.fps,m.codec,m.has_audio,m.rotation,m.status source_status,r.label source_label
+            item_rows = connection.execute(
+                "SELECT position,selection_id,snapshot_json FROM preeditor_sequence_items WHERE version_id=? ORDER BY position",
+                (version_id,),
+            ).fetchall()
+            legacy_rows = connection.execute(
+                """SELECT i.position,x.*,m.filename,m.current_path,m.fingerprint source_fingerprint,m.duration source_duration,
+                          m.width,m.height,m.fps,m.codec,m.has_audio,m.rotation,m.is_vfr,m.status source_status,r.label source_label
                    FROM preeditor_sequence_items i
                    JOIN preeditor_selections x ON x.id=i.selection_id
                    JOIN preeditor_sources m ON m.id=x.source_id
@@ -879,7 +1308,16 @@ class PreEditor:
                    WHERE i.version_id=? ORDER BY i.position""",
                 (version_id,),
             ).fetchall()
-        items = [self._selection_payload(row) for row in rows]
+        legacy_by_position = {int(row["position"]): row for row in legacy_rows}
+        items: list[dict[str, Any]] = []
+        for item_row in item_rows:
+            raw_snapshot = item_row["snapshot_json"]
+            if raw_snapshot:
+                snapshot = json.loads(str(raw_snapshot))
+                snapshot["position"] = int(item_row["position"])
+                items.append(self._selection_payload(snapshot))
+            else:
+                items.append(self._selection_payload(legacy_by_position[int(item_row["position"])]))
         return {
             **dict(version),
             "items": items,

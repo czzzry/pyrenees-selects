@@ -8,9 +8,12 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 from typing import Any, Sequence
 
 from .config import bundled_resource_dir
@@ -22,6 +25,15 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg"}
 
 class MediaToolError(RuntimeError):
     pass
+
+
+def _process_failure_message(exc: BaseException) -> str:
+    """Keep the actionable tail of FFmpeg output without exposing a command."""
+    stderr = getattr(exc, "stderr", "") or ""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    lines = [line.strip() for line in str(stderr).splitlines() if line.strip()]
+    return lines[-1][:1_000] if lines else str(exc)[:1_000]
 
 
 @dataclass(frozen=True)
@@ -37,6 +49,7 @@ class VideoMetadata:
     size_bytes: int
     has_audio: bool = False
     rotation: int = 0
+    is_vfr: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -59,7 +72,7 @@ def require_media_tools() -> tuple[str, str]:
     ffmpeg = _bundled_tool("ffmpeg") or shutil.which("ffmpeg")
     ffprobe = _bundled_tool("ffprobe") or shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
-        raise MediaToolError("The bundled media tools could not be found. Reinstall Pyrenees Selects.")
+        raise MediaToolError("The bundled media tools could not be found. Reinstall Selects.")
     return ffmpeg, ffprobe
 
 
@@ -92,7 +105,7 @@ def probe_video(path: Path, ffprobe: str | None = None) -> VideoMetadata:
         tool,
         "-v", "error",
         "-show_entries",
-        "stream=codec_type,codec_name,width,height,avg_frame_rate:stream_tags=rotate:stream_side_data=rotation:format=duration:format_tags=creation_time",
+        "stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate:stream_tags=rotate:stream_side_data=rotation:format=duration:format_tags=creation_time",
         "-of", "json",
         str(resolved),
     ]
@@ -114,6 +127,8 @@ def probe_video(path: Path, ffprobe: str | None = None) -> VideoMetadata:
         rotation = int(round(float(side_rotation if side_rotation is not None else tag_rotation or 0))) % 360
     except (TypeError, ValueError):
         rotation = 0
+    average_rate = _fraction(stream.get("avg_frame_rate"))
+    nominal_rate = _fraction(stream.get("r_frame_rate"))
     return VideoMetadata(
         path=str(resolved),
         filename=resolved.name,
@@ -121,11 +136,12 @@ def probe_video(path: Path, ffprobe: str | None = None) -> VideoMetadata:
         duration=duration,
         width=int(stream.get("width") or 0),
         height=int(stream.get("height") or 0),
-        fps=_fraction(stream.get("avg_frame_rate")),
+        fps=average_rate,
         codec=str(stream.get("codec_name") or "unknown"),
         size_bytes=resolved.stat().st_size,
         has_audio=any(item.get("codec_type") == "audio" for item in streams),
         rotation=rotation,
+        is_vfr=bool(average_rate and nominal_rate and abs(average_rate - nominal_rate) > 0.01),
     )
 
 
@@ -203,6 +219,186 @@ def render_review_clip(
         temporary.unlink(missing_ok=True)
         raise MediaToolError(f"Could not create review clip for {source.name}.") from exc
     return destination
+
+
+def render_source_proxy(
+    source: Path,
+    destination: Path,
+    *,
+    ffmpeg: str | None = None,
+    timeout_seconds: float = 7_200,
+    cancel: Event | None = None,
+) -> Path:
+    """Create a seekable, full-length local review copy with source audio.
+
+    The file is disposable and timing-compatible with the original, so In/Out
+    decisions made against it remain valid when the originals are handed off.
+    """
+    resolved = source.expanduser().resolve(strict=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and destination.stat().st_size > 0:
+        try:
+            probe_video(destination)
+            return destination
+        except (MediaToolError, OSError):
+            destination.unlink(missing_ok=True)
+    tool = ffmpeg or require_media_tools()[0]
+    temporary = destination.with_name(f".{destination.stem}.{uuid.uuid4().hex[:10]}.partial.mp4")
+    temporary.unlink(missing_ok=True)
+    command = [
+        tool,
+        "-v", "error",
+        "-i", str(resolved),
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-vf", "scale=w='trunc(min(1280,iw)/2)*2':h=-2",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "27",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        "-y", str(temporary),
+    ]
+    try:
+        _run_cancellable(command, cancel=cancel, timeout_seconds=timeout_seconds)
+        temporary.replace(destination)
+    except (subprocess.SubprocessError, InterruptedError) as exc:
+        temporary.unlink(missing_ok=True)
+        if isinstance(exc, InterruptedError):
+            raise
+        raise MediaToolError(
+            f"Could not create a review copy for {resolved.name}: {_process_failure_message(exc)}"
+        ) from exc
+    return destination
+
+
+def _run_cancellable(command: list[str], *, cancel: Event | None, timeout_seconds: float) -> None:
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    started = time.monotonic()
+    try:
+        while process.poll() is None:
+            if cancel and cancel.is_set():
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise InterruptedError("Media preparation cancelled.")
+            if time.monotonic() - started > timeout_seconds:
+                process.kill()
+                process.wait()
+                raise subprocess.TimeoutExpired(command, timeout_seconds)
+            time.sleep(0.05)
+        if process.returncode:
+            error = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+            raise subprocess.CalledProcessError(process.returncode, command, stderr=error)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        if process.stderr is not None:
+            process.stderr.close()
+
+
+def render_candidate_sample(
+    source: Path,
+    destination: Path,
+    *,
+    in_us: int,
+    out_us: int,
+    source_fps: float,
+    has_audio: bool,
+    is_vfr: bool = False,
+    cancel: Event | None = None,
+    ffmpeg: str | None = None,
+    ffprobe: str | None = None,
+    timeout_seconds: float = 900,
+) -> tuple[Path, dict[str, Any]]:
+    """Render, validate and atomically publish one exact candidate sample."""
+    if in_us < 0 or out_us <= in_us:
+        raise ValueError("Candidate In/Out points are invalid.")
+    resolved = source.expanduser().resolve(strict=True)
+    destination = destination.expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tool, probe_tool = require_media_tools()
+    tool = ffmpeg or tool
+    probe_tool = ffprobe or probe_tool
+    token = uuid.uuid4().hex[:10]
+    temporary = destination.with_name(f".{destination.stem}.{token}.partial.mp4")
+    temporary.unlink(missing_ok=True)
+    start = in_us / 1_000_000
+    duration = (out_us - in_us) / 1_000_000
+    command = [
+        tool, "-v", "error", "-ss", f"{start:.6f}", "-i", str(resolved),
+        "-t", f"{duration:.6f}", "-map", "0:v:0",
+    ]
+    if has_audio:
+        command.extend(["-map", "0:a:0?", "-c:a", "aac", "-b:a", "112k"])
+    command.extend([
+        "-vf", "scale=w='trunc(min(960,iw)/2)*2':h=-2",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart", "-y", str(temporary),
+    ])
+    try:
+        _run_cancellable(command, cancel=cancel, timeout_seconds=timeout_seconds)
+        metadata = probe_video(temporary, ffprobe=probe_tool)
+        tolerance = 0.05 if is_vfr else (1 / source_fps) if source_fps > 0 else 0.05
+        if abs(metadata.duration - duration) > tolerance:
+            raise MediaToolError(
+                f"Candidate sample duration {metadata.duration:.3f}s did not match requested {duration:.3f}s."
+            )
+        source_signature = frame_signature(resolved, in_us=in_us, ffmpeg=tool)
+        sample_signature = frame_signature(temporary, in_us=0, ffmpeg=tool)
+        signature_distance = signature_hamming_distance(source_signature, sample_signature)
+        if signature_distance > 0.22:
+            raise MediaToolError("Candidate sample did not begin at the requested source frame.")
+        temporary.replace(destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return destination, {
+        "source_in_us": in_us,
+        "source_out_us": out_us,
+        "output_duration_us": round(metadata.duration * 1_000_000),
+        "codec": metadata.codec,
+        "has_audio": metadata.has_audio,
+        "first_frame_signature": sample_signature,
+        "source_frame_signature": source_signature,
+        "signature_distance": signature_distance,
+    }
+
+
+def frame_signature(path: Path, *, in_us: int = 0, ffmpeg: str | None = None) -> str:
+    """Return a small perceptual signature for the frame at one source PTS."""
+    resolved = path.expanduser().resolve(strict=True)
+    tool = ffmpeg or require_media_tools()[0]
+    command = [
+        tool, "-v", "error", "-ss", f"{max(0, int(in_us)) / 1_000_000:.6f}",
+        "-i", str(resolved), "-frames:v", "1", "-vf", "scale=32:18,format=gray",
+        "-f", "rawvideo", "-",
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, timeout=45)
+    except subprocess.SubprocessError as exc:
+        raise MediaToolError(
+            f"Could not verify the first frame in {resolved.name}: {_process_failure_message(exc)}"
+        ) from exc
+    pixels = result.stdout
+    if len(pixels) != 32 * 18:
+        raise MediaToolError(f"Could not verify the first frame in {resolved.name}.")
+    average = sum(pixels) / len(pixels)
+    bits = "".join("1" if value >= average else "0" for value in pixels)
+    return f"{int(bits, 2):0{len(bits) // 4}x}"
+
+
+def signature_hamming_distance(first: str, second: str) -> float:
+    if len(first) != len(second) or not first:
+        return 1.0
+    differing = (int(first, 16) ^ int(second, 16)).bit_count()
+    return differing / (len(first) * 4)
 
 
 def render_context_frame(source: Path, destination: Path, timestamp: float, ffmpeg: str | None = None) -> Path:

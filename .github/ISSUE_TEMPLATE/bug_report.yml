@@ -1,0 +1,51 @@
+name: Bug report
+description: Report a reproducible problem in a supported Selects workflow.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach private footage, local folder paths, API keys, or security exploit details.
+  - type: input
+    id: version
+    attributes:
+      label: Selects version or commit
+      placeholder: 0.7.0 or a commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Mac and macOS version
+      placeholder: 2019 Intel MacBook Pro, macOS 15.6
+    validations:
+      required: true
+  - type: dropdown
+    id: sample
+    attributes:
+      label: Does the built-in sample project work?
+      options: ["Yes", "No", "Not tested"]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: Tell us the smallest exact sequence that produces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: Non-sensitive media details
+      description: Codec, resolution, frame rate, approximate file size, and whether audio exists. Do not include a local path.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Sanitized `selects doctor` output and exact error

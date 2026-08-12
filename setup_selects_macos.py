@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 
 from setuptools import setup
@@ -9,23 +10,32 @@ from setuptools import setup
 ROOT = Path(__file__).parent.resolve()
 FFMPEG = Path(os.environ.get("SELECTS_BUILD_FFMPEG", ROOT / "build" / "selects-media-tools" / "ffmpeg")).resolve()
 FFPROBE = Path(os.environ.get("SELECTS_BUILD_FFPROBE", ROOT / "build" / "selects-media-tools" / "ffprobe")).resolve()
-ICON = ROOT / "packaging" / "macos" / "PyreneesSelects.icns"
+ICON = Path(os.environ.get("SELECTS_BUILD_ICON", ROOT / "build" / "Selects.icns")).resolve()
+VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
 
 for required in (FFMPEG, FFPROBE, ICON):
     if not required.is_file():
         raise FileNotFoundError(f"Required Mac application resource not found: {required}")
 
 def relative(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        # Reproducible smoke builds can place verified media tools outside the
+        # working tree. setuptools accepts absolute data-file inputs.
+        return str(path)
 
 
 static_files = sorted((ROOT / "pyrenees_selects" / "static").iterdir())
 
 setup(
     name="Selects",
-    version="0.7.0",
+    version=VERSION,
     app=["selects_macos_launcher.py"],
-    packages=["pyrenees_selects"],
+    # py2app follows the generic launcher's imports. Do not force the entire
+    # historical package (and its case-study-only optional dependencies) into
+    # the reusable desktop application.
+    packages=[],
     data_files=[
         ("static", [relative(path) for path in static_files]),
         ("bin", [relative(FFMPEG), relative(FFPROBE)]),
@@ -48,7 +58,7 @@ setup(
                 "CFBundleDisplayName": "Selects",
                 "CFBundleIdentifier": "com.cezarybaraniecki.selects",
                 "CFBundleName": "Selects",
-                "CFBundleShortVersionString": "0.7.0",
+                "CFBundleShortVersionString": VERSION,
                 "CFBundleVersion": "1",
                 "LSApplicationCategoryType": "public.app-category.video",
                 "LSMinimumSystemVersion": "12.0",

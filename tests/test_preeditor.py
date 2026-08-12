@@ -1,7 +1,9 @@
+import json
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pyrenees_selects.media import VideoMetadata
 from pyrenees_selects.preeditor import PreEditor, ProjectOptions, SelectionDraft
@@ -42,6 +44,15 @@ class PreEditorTests(unittest.TestCase):
     def scan(self) -> list[dict]:
         self.editor.add_source_root(self.project["id"], self.media)
         return self.editor.scan(self.project["id"], probe=self.probe)["sources"]
+
+    def test_new_project_defaults_are_a_120_second_landscape_brief(self) -> None:
+        project = self.editor.create_project(ProjectOptions("Default brief"))
+        self.assertEqual(project["target_duration_seconds"], 120)
+        self.assertEqual(project["orientation"], "landscape")
+        self.assertEqual(
+            (project["shot_rhythm"], project["shot_min_seconds"], project["shot_max_seconds"]),
+            ("balanced", 6, 9),
+        )
 
     def test_recursive_scan_continues_after_a_bad_file(self) -> None:
         (self.media / "broken.mp4").write_bytes(b"broken")
@@ -85,6 +96,30 @@ class PreEditorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match"):
             self.editor.relink_source(source["id"], replacement, probe=self.probe)
 
+    def test_preparation_revalidates_source_bytes_after_scan(self) -> None:
+        source = next(item for item in self.scan() if item["filename"] == "first.mp4")
+        (self.media / "first.mp4").write_bytes(b"changed-data")
+        with patch("pyrenees_selects.preeditor.probe_video", side_effect=self.probe):
+            with self.assertRaisesRegex(ValueError, "changed on disk"):
+                self.editor.assert_source_unchanged(source["id"], source["fingerprint"])
+
+    def test_full_fingerprint_detects_same_size_middle_change(self) -> None:
+        payload = bytearray(b"a" * 200_000)
+        (self.media / "first.mp4").write_bytes(payload)
+        source = next(item for item in self.scan() if item["filename"] == "first.mp4")
+        payload[100_000] = ord("b")
+        (self.media / "first.mp4").write_bytes(payload)
+        with patch("pyrenees_selects.preeditor.probe_video", side_effect=self.probe):
+            with self.assertRaisesRegex(ValueError, "changed on disk"):
+                self.editor.assert_source_unchanged(source["id"], source["fingerprint"])
+
+    def test_scan_rejects_symlink_escape_from_registered_root(self) -> None:
+        outside = self.root / "outside.mp4"
+        outside.write_bytes(b"outside-source")
+        (self.media / "linked.mp4").symlink_to(outside)
+        sources = self.scan()
+        self.assertNotIn("linked.mp4", {item["filename"] for item in sources})
+
     def test_multiple_ranges_comments_markers_and_validation(self) -> None:
         source = self.scan()[0]
         first = self.editor.create_selection(
@@ -98,8 +133,8 @@ class PreEditorTests(unittest.TestCase):
         self.assertEqual(len(self.editor.selections(self.project["id"])), 2)
         self.assertEqual(self.editor.markers(first["id"])[0]["comment"], "Cut after the turn")
         self.assertNotEqual(first["id"], second["id"])
-        with self.assertRaises(ValueError):
-            self.editor.update_selection(second["id"], out_seconds=30)
+        clamped = self.editor.update_selection(second["id"], out_seconds=30)
+        self.assertEqual(clamped["out_seconds"], source["duration"])
 
     def test_project_settings_backup_and_selection_archive_are_safe(self) -> None:
         source = self.scan()[0]
@@ -143,6 +178,48 @@ class PreEditorTests(unittest.TestCase):
         self.assertEqual(self.editor.sequence_version(v1["id"])["items"][0]["id"], selections[0]["id"])
         self.assertEqual(v2["version"], 2)
         self.assertEqual(v2["duration"], 8)
+
+    def test_sequence_item_is_a_frozen_snapshot_after_selection_changes(self) -> None:
+        source = self.scan()[0]
+        selection = self.editor.create_selection(
+            self.project["id"],
+            SelectionDraft(source["id"], 1, 5, decision="keep", comment="Original note"),
+        )
+        v1 = self.editor.create_sequence(self.project["id"], "Frozen cut", [selection["id"]])
+        self.editor.update_selection(
+            selection["id"], in_seconds=3, out_seconds=9, comment="A later edit",
+            treatment={"rotation": 90},
+        )
+        v2 = self.editor.latest_sequence_version(v1["sequence_id"])
+
+        frozen = self.editor.sequence_version(v1["id"])["items"][0]
+        current = self.editor.sequence_version(v2["id"])["items"][0]
+        self.assertEqual((frozen["in_seconds"], frozen["out_seconds"], frozen["comment"]), (1, 5, "Original note"))
+        self.assertEqual((current["in_seconds"], current["out_seconds"], current["comment"]), (3, 9, "A later edit"))
+        self.assertEqual(frozen["treatment"], {})
+        self.assertEqual(current["treatment"], {"rotation": 90})
+        revisions = self.editor.selection_revisions(selection["id"])
+        self.assertEqual([item["revision"] for item in revisions], [1, 2])
+        self.assertEqual(json.loads(revisions[0]["snapshot_json"])["comment"], "Original note")
+
+    def test_sequence_orientation_is_frozen_with_the_version(self) -> None:
+        source = self.scan()[0]
+        selection = self.editor.create_selection(
+            self.project["id"], SelectionDraft(source["id"], 1, 5, decision="keep")
+        )
+        landscape = self.editor.create_sequence(self.project["id"], "Frozen format", [selection["id"]])
+        self.editor.update_project(self.project["id"], orientation="portrait")
+        self.assertEqual(self.editor.sequence_version(landscape["id"])["orientation"], "landscape")
+        portrait = self.editor.revise_sequence(landscape["sequence_id"], [selection["id"]])
+        self.assertEqual(portrait["orientation"], "portrait")
+
+    def test_canonical_selection_times_are_integer_microseconds(self) -> None:
+        source = self.scan()[0]
+        selection = self.editor.create_selection(
+            self.project["id"], SelectionDraft(source["id"], 0.91, 2.09, decision="keep")
+        )
+        self.assertEqual((selection["in_us"], selection["out_us"]), (900_000, 2_100_000))
+        self.assertEqual(selection["duration_us"], 1_200_000)
 
     def test_agent_context_is_path_free_and_proposals_require_approval(self) -> None:
         source = self.scan()[0]
