@@ -19,7 +19,7 @@ classifiers = [
 
 [project.optional-dependencies]
 test = [
-  "Pillow>=12.2,<13",
+  "Pillow>=12.2,<14",
 ]
 desktop = [
   "pywebview>=6.2,<7",
